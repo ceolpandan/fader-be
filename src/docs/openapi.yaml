@@ -1,0 +1,299 @@
+openapi: 3.0.3
+info:
+  title: discogs-fade-backend
+  version: 0.1.0
+  description: >
+    Boundary between the extension and Discogs' API. Wraps GET /releases/{id}
+    and GET /masters/{id}. All Discogs response fields are currently passed
+    through unscoped (see fader-be/tasks/df-003-endpoint-scope.md for the
+    deferred trim-down pass).
+paths:
+  /releases/{id}:
+    get:
+      operationId: getRelease
+      summary: Get a release by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Release found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseDetailDto"
+        "400":
+          description: Invalid id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /masters/{id}:
+    get:
+      operationId: getMaster
+      summary: Get a master release by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Master found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MasterDetailDto"
+        "400":
+          description: Invalid id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Master not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+
+components:
+  schemas:
+    ErrorDto:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    Artist:
+      type: object
+      required: [id, name, resource_url]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        anv: { type: string }
+        join: { type: string }
+        role: { type: string }
+        tracks: { type: string }
+        resource_url: { type: string }
+        thumbnail_url: { type: string }
+
+    Label:
+      type: object
+      required: [id, name, resource_url]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        catno: { type: string }
+        entity_type: { type: string }
+        entity_type_name: { type: string }
+        resource_url: { type: string }
+        thumbnail_url: { type: string }
+
+    Company:
+      $ref: "#/components/schemas/Label"
+
+    Format:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        qty: { type: string }
+        text: { type: string }
+        descriptions:
+          type: array
+          items: { type: string }
+
+    Identifier:
+      type: object
+      required: [type, value]
+      properties:
+        type: { type: string }
+        value: { type: string }
+        description: { type: string }
+
+    Video:
+      type: object
+      required: [uri]
+      properties:
+        uri: { type: string }
+        title: { type: string }
+        description: { type: string }
+        duration: { type: integer }
+        embed: { type: boolean }
+
+    Track:
+      type: object
+      required: [position, title]
+      properties:
+        position: { type: string }
+        type_: { type: string }
+        title: { type: string }
+        duration: { type: string }
+        extraartists:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artist"
+
+    Image:
+      type: object
+      required: [type, uri, resource_url]
+      properties:
+        type: { type: string }
+        uri: { type: string }
+        resource_url: { type: string }
+        uri150: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+
+    CommunityUser:
+      type: object
+      required: [username, resource_url]
+      properties:
+        username: { type: string }
+        resource_url: { type: string }
+
+    Community:
+      type: object
+      properties:
+        have: { type: integer }
+        want: { type: integer }
+        rating:
+          type: object
+          properties:
+            count: { type: integer }
+            average: { type: number }
+        submitter:
+          $ref: "#/components/schemas/CommunityUser"
+        contributors:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommunityUser"
+        data_quality: { type: string }
+        status: { type: string }
+
+    ReleaseDetailDto:
+      type: object
+      required: [id, resource_url, artists, title]
+      properties:
+        id: { type: integer }
+        status: { type: string }
+        year: { type: integer }
+        resource_url: { type: string }
+        uri: { type: string }
+        artists:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artist"
+        artists_sort: { type: string }
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Label"
+        series:
+          type: array
+          items: {}
+        companies:
+          type: array
+          items:
+            $ref: "#/components/schemas/Company"
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/Format"
+        data_quality: { type: string }
+        community:
+          $ref: "#/components/schemas/Community"
+        format_quantity: { type: integer }
+        date_added: { type: string }
+        date_changed: { type: string }
+        num_for_sale: { type: integer }
+        lowest_price: { type: number }
+        master_id: { type: integer }
+        master_url: { type: string }
+        title: { type: string }
+        country: { type: string }
+        released: { type: string }
+        notes: { type: string }
+        released_formatted: { type: string }
+        identifiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Identifier"
+        videos:
+          type: array
+          items:
+            $ref: "#/components/schemas/Video"
+        genres:
+          type: array
+          items: { type: string }
+        styles:
+          type: array
+          items: { type: string }
+        tracklist:
+          type: array
+          items:
+            $ref: "#/components/schemas/Track"
+        extraartists:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artist"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/Image"
+        thumb: { type: string }
+        estimated_weight: { type: integer }
+        blocked_from_sale: { type: boolean }
+        is_offensive: { type: boolean }
+
+    MasterDetailDto:
+      type: object
+      required: [id, resource_url, artists, title]
+      properties:
+        id: { type: integer }
+        main_release: { type: integer }
+        most_recent_release: { type: integer }
+        resource_url: { type: string }
+        uri: { type: string }
+        versions_url: { type: string }
+        main_release_url: { type: string }
+        most_recent_release_url: { type: string }
+        num_for_sale: { type: integer }
+        lowest_price: { type: number }
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/Image"
+        genres:
+          type: array
+          items: { type: string }
+        styles:
+          type: array
+          items: { type: string }
+        year: { type: integer }
+        tracklist:
+          type: array
+          items:
+            $ref: "#/components/schemas/Track"
+        artists:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artist"
+        title: { type: string }
+        data_quality: { type: string }
+        videos:
+          type: array
+          items:
+            $ref: "#/components/schemas/Video"

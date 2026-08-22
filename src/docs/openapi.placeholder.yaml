@@ -1,5 +1,0 @@
-openapi: 3.0.3
-info:
-  title: discogs-fade-backend
-  version: 0.0.0-placeholder
-paths: {}

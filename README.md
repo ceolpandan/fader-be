@@ -17,6 +17,12 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 - Swagger UI: `http://localhost:3000/docs`
 - Raw OpenAPI spec (JSON): `http://localhost:3000/docs-json`
 - Health check: `http://localhost:3000/health`
+- `GET /releases/:id` — proxies `https://api.discogs.com/releases/:id`
+- `GET /masters/:id` — proxies `https://api.discogs.com/masters/:id`
+
+Set `DISCOGS_TOKEN` (personal access token from
+https://www.discogs.com/settings/developers) to raise Discogs' rate limit.
+Unauthenticated requests work but are limited to 25/min.
 
 ## Scripts
 
@@ -30,9 +36,12 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 
 ```
 src/
-  index.ts    entrypoint, starts the server
-  app.ts      express app + middleware wiring
-  docs/       OpenAPI spec served via Swagger UI (placeholder for now, see tasks/df-005)
-docs/         project docs (endpoint scope, samples, DTO notes — see tasks/)
-tasks/        df-xxx implementation task docs for this repo
+  index.ts          entrypoint, starts the server
+  app.ts            express app + middleware wiring
+  discogs-client.ts fetch wrapper for the real Discogs API
+  routes/           releases.ts, masters.ts — our endpoints
+  types/            raw Discogs API response types
+  dto/              our DTOs (all fields kept for now — see tasks/df-003) + mappers
+  docs/             openapi.yaml served via Swagger UI
+tasks/              df-xxx implementation task docs for this repo
 ```
