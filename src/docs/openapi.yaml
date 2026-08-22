@@ -41,8 +41,9 @@ paths:
     post:
       operationId: fade
       summary: >
-        Resolve a release id to every id (the release plus its master and all
-        sibling versions) that should be faded from the page.
+        Resolve a release id or a master id to every id that should be faded
+        from the page (the release plus its master and all sibling versions,
+        or all versions under a master).
       requestBody:
         required: true
         content:
@@ -109,9 +110,11 @@ components:
 
     FadeRequestDto:
       type: object
-      required: [releaseId]
+      description: Provide exactly one of releaseId or masterId.
       properties:
         releaseId:
+          type: integer
+        masterId:
           type: integer
         action:
           type: string
@@ -120,7 +123,7 @@ components:
 
     FadeResponseDto:
       type: object
-      required: [releaseId, releaseIds]
+      required: [releaseIds]
       properties:
         releaseId:
           type: integer

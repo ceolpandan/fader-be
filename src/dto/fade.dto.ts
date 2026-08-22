@@ -1,12 +1,13 @@
 export type FadeAction = "fade";
 
 export interface FadeRequestDto {
-  releaseId: number;
+  releaseId?: number;
+  masterId?: number;
   action?: FadeAction;
 }
 
 export interface FadeResponseDto {
-  releaseId: number;
+  releaseId?: number;
   masterId?: number;
   releaseIds: number[];
 }

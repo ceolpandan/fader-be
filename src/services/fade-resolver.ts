@@ -1,7 +1,7 @@
 import { getAllMasterVersionReleaseIds, getRelease } from "../discogs-client";
 import type { FadeResponseDto } from "../dto/fade.dto";
 
-export async function resolveFadeIds(releaseId: number): Promise<FadeResponseDto> {
+export async function resolveFadeFromRelease(releaseId: number): Promise<FadeResponseDto> {
   const release = await getRelease(releaseId);
 
   if (!release.master_id) {
@@ -14,4 +14,9 @@ export async function resolveFadeIds(releaseId: number): Promise<FadeResponseDto
   }
 
   return { releaseId, masterId: release.master_id, releaseIds };
+}
+
+export async function resolveFadeFromMaster(masterId: number): Promise<FadeResponseDto> {
+  const releaseIds = await getAllMasterVersionReleaseIds(masterId);
+  return { masterId, releaseIds };
 }
