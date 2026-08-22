@@ -1,4 +1,8 @@
-import type { DiscogsMaster, DiscogsRelease } from "./types/discogs-api";
+import type {
+  DiscogsMaster,
+  DiscogsMasterVersionsResponse,
+  DiscogsRelease,
+} from "./types/discogs-api";
 
 const DISCOGS_API_BASE = "https://api.discogs.com";
 const USER_AGENT = "discogs-fade-backend/0.1 +https://github.com/discogs-fade";
@@ -29,4 +33,26 @@ export function getRelease(releaseId: number) {
 
 export function getMaster(masterId: number) {
   return discogsGet<DiscogsMaster>(`/masters/${masterId}`);
+}
+
+function getMasterVersionsPage(masterId: number, page: number) {
+  return discogsGet<DiscogsMasterVersionsResponse>(
+    `/masters/${masterId}/versions?page=${page}&per_page=100`,
+  );
+}
+
+/** Walks every page of /masters/{id}/versions, returns all sibling release ids. */
+export async function getAllMasterVersionReleaseIds(masterId: number): Promise<number[]> {
+  const ids: number[] = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const res = await getMasterVersionsPage(masterId, page);
+    ids.push(...res.versions.map((v) => v.id));
+    totalPages = res.pagination.pages;
+    page += 1;
+  } while (page <= totalPages);
+
+  return ids;
 }

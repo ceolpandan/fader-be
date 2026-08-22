@@ -37,6 +37,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /fade:
+    post:
+      operationId: fade
+      summary: >
+        Resolve a release id to every id (the release plus its master and all
+        sibling versions) that should be faded from the page.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FadeRequestDto"
+      responses:
+        "200":
+          description: Ids resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FadeResponseDto"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /masters/{id}:
     get:
       operationId: getMaster
@@ -75,6 +106,30 @@ components:
       properties:
         error:
           type: string
+
+    FadeRequestDto:
+      type: object
+      required: [releaseId]
+      properties:
+        releaseId:
+          type: integer
+        action:
+          type: string
+          enum: [fade]
+          default: fade
+
+    FadeResponseDto:
+      type: object
+      required: [releaseId, releaseIds]
+      properties:
+        releaseId:
+          type: integer
+        masterId:
+          type: integer
+        releaseIds:
+          type: array
+          items:
+            type: integer
 
     Artist:
       type: object

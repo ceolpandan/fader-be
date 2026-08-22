@@ -124,6 +124,32 @@ export interface DiscogsRelease {
   is_offensive?: boolean;
 }
 
+export interface DiscogsMasterVersion {
+  id: number;
+  label?: string;
+  country?: string;
+  title: string;
+  major_formats?: string[];
+  format?: string;
+  catno?: string;
+  released?: string;
+  status?: string;
+  resource_url: string;
+  thumb?: string;
+}
+
+export interface DiscogsPagination {
+  page: number;
+  pages: number;
+  per_page: number;
+  items: number;
+}
+
+export interface DiscogsMasterVersionsResponse {
+  pagination: DiscogsPagination;
+  versions: DiscogsMasterVersion[];
+}
+
 export interface DiscogsMaster {
   id: number;
   main_release?: number;

@@ -3,6 +3,7 @@ import path from "node:path";
 import express, { type Express } from "express";
 import yaml from "js-yaml";
 import swaggerUi from "swagger-ui-express";
+import { fadeRouter } from "./routes/fade";
 import { mastersRouter } from "./routes/masters";
 import { releasesRouter } from "./routes/releases";
 
@@ -21,6 +22,7 @@ export function createApp(): Express {
 
   app.use("/releases", releasesRouter);
   app.use("/masters", mastersRouter);
+  app.use("/fade", fadeRouter);
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
