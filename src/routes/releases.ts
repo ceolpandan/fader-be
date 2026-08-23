@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { DiscogsNotFoundError, getRelease } from "../discogs-client";
 import { mapReleaseToDto } from "../dto/mappers";
+import { logger } from "../util/logger";
 
 export const releasesRouter = Router();
 
@@ -19,6 +20,7 @@ releasesRouter.get("/:id", async (req, res) => {
       res.status(404).json({ error: "Release not found" });
       return;
     }
+    logger.error("Failed to fetch release from Discogs", err);
     res.status(502).json({ error: "Failed to fetch release from Discogs" });
   }
 });
