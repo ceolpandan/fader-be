@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import cors from "cors";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import * as yaml from "js-yaml";
 import swaggerUi from "swagger-ui-express";
@@ -23,6 +24,7 @@ export interface AppDeps {
 export function createApp(deps: AppDeps): Express {
   const app = express();
 
+  app.use(cors({ origin: "http://localhost:4200" }));
   app.use(requestLogger);
   app.use(express.json());
 
