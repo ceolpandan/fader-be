@@ -1,21 +1,84 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { Router } from "express";
 import type { Db } from "../db/client";
-import { discogsQueueJobs, releases, sellerInventory, sellers, type SellerInventoryStatus } from "../db/schema";
-import type { IndexStartedDto, SellerInventoryPageDto, SellerStatusDto } from "../dto/seller.dto";
+import { discogsQueueJobs, releases, sellerInventory, sellers } from "../db/schema";
+import type {
+  IndexStartedDto,
+  SellerInventoryFacetsDto,
+  SellerInventoryPageDto,
+  SellerStatusDto,
+  SellerSummaryDto,
+} from "../dto/seller.dto";
 import type { DiscogsQueue } from "../queue/discogs-queue";
 
-const INVENTORY_STATUS_FILTERS = ["active", "sold", "all"] as const;
-type InventoryStatusFilter = (typeof INVENTORY_STATUS_FILTERS)[number];
+const SORT_FIELDS = ["title", "year", "artist", "format"] as const;
+type SortField = (typeof SORT_FIELDS)[number];
+const SORT_OPTIONS = SORT_FIELDS.flatMap((field) => [field, `-${field}`]) as string[];
 
 export interface SellersRouterDeps {
   db: Db;
   queue: DiscogsQueue;
 }
 
+function parseCommaSeparated(value: unknown): string[] {
+  if (typeof value !== "string" || value.length === 0) return [];
+  return value
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+function jsonArrayHasAny(column: SQLiteColumn, values: string[]): SQL {
+  const placeholders = sql.join(
+    values.map((v) => sql`${v}`),
+    sql`, `,
+  );
+  return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value IN (${placeholders}))`;
+}
+
+function jsonFormatNameHasAny(column: SQLiteColumn, values: string[]): SQL {
+  const placeholders = sql.join(
+    values.map((v) => sql`${v}`),
+    sql`, `,
+  );
+  return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') IN (${placeholders}))`;
+}
+
+function sortColumn(field: SortField) {
+  switch (field) {
+    case "title":
+      return releases.title;
+    case "year":
+      return releases.year;
+    case "artist":
+      return sql`json_extract(${releases.artists}, '$[0].name')`;
+    case "format":
+      return sql`json_extract(${releases.formats}, '$[0].name')`;
+  }
+}
+
 export function createSellersRouter(deps: SellersRouterDeps): Router {
   const router = Router();
+
+  router.get("/", (_req, res) => {
+    const rows = deps.db
+      .select({
+        username: sellers.username,
+        lastIndexedAt: sellers.lastIndexedAt,
+        lastIndexStatus: sellers.lastIndexStatus,
+      })
+      .from(sellers)
+      .all();
+
+    const dto: SellerSummaryDto[] = rows.map((row) => ({
+      username: row.username,
+      lastIndexedAt: row.lastIndexedAt?.toISOString() ?? null,
+      lastIndexStatus: row.lastIndexStatus,
+    }));
+    res.json(dto);
+  });
 
   router.post("/:username/index", (req, res) => {
     const { username } = req.params;
@@ -84,15 +147,43 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     res.json(dto);
   });
 
-  router.get("/:username/inventory", (req, res) => {
+  router.get("/:username/inventory/facets", (req, res) => {
     const { username } = req.params;
 
-    const statusParam = (req.query.status as string | undefined) ?? "active";
-    if (!INVENTORY_STATUS_FILTERS.includes(statusParam as InventoryStatusFilter)) {
-      res.status(400).json({ error: "status must be one of active, sold, all" });
-      return;
+    const rows = deps.db
+      .select({
+        genres: releases.genres,
+        styles: releases.styles,
+        formats: releases.formats,
+        country: releases.country,
+      })
+      .from(sellerInventory)
+      .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
+      .where(eq(sellerInventory.sellerUsername, username))
+      .all();
+
+    const genres = new Set<string>();
+    const styles = new Set<string>();
+    const formats = new Set<string>();
+    const countries = new Set<string>();
+    for (const row of rows) {
+      for (const g of row.genres) genres.add(g);
+      for (const s of row.styles) styles.add(s);
+      for (const f of row.formats) formats.add(f.name);
+      if (row.country) countries.add(row.country);
     }
-    const statusFilter = statusParam as InventoryStatusFilter;
+
+    const dto: SellerInventoryFacetsDto = {
+      genres: [...genres].sort(),
+      styles: [...styles].sort(),
+      formats: [...formats].sort(),
+      countries: [...countries].sort(),
+    };
+    res.json(dto);
+  });
+
+  router.get("/:username/inventory", (req, res) => {
+    const { username } = req.params;
 
     const page = Number(req.query.page ?? 1);
     const pageSize = Number(req.query.pageSize ?? 50);
@@ -105,13 +196,44 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       return;
     }
 
-    const whereClause =
-      statusFilter === "all"
-        ? eq(sellerInventory.sellerUsername, username)
-        : and(
-            eq(sellerInventory.sellerUsername, username),
-            eq(sellerInventory.status, statusFilter as SellerInventoryStatus),
-          );
+    const genreFilter = parseCommaSeparated(req.query.genre);
+    const styleFilter = parseCommaSeparated(req.query.style);
+    const formatFilter = parseCommaSeparated(req.query.format);
+    const countryFilter = parseCommaSeparated(req.query.country);
+
+    let yearMin: number | undefined;
+    if (req.query.yearMin !== undefined) {
+      yearMin = Number(req.query.yearMin);
+      if (!Number.isInteger(yearMin)) {
+        res.status(400).json({ error: "yearMin must be an integer" });
+        return;
+      }
+    }
+    let yearMax: number | undefined;
+    if (req.query.yearMax !== undefined) {
+      yearMax = Number(req.query.yearMax);
+      if (!Number.isInteger(yearMax)) {
+        res.status(400).json({ error: "yearMax must be an integer" });
+        return;
+      }
+    }
+
+    const sortParam = (req.query.sort as string | undefined) ?? "title";
+    if (!SORT_OPTIONS.includes(sortParam)) {
+      res.status(400).json({ error: `sort must be one of ${SORT_OPTIONS.join(", ")}` });
+      return;
+    }
+    const isDescending = sortParam.startsWith("-");
+    const sortField = (isDescending ? sortParam.slice(1) : sortParam) as SortField;
+
+    const conditions = [eq(sellerInventory.sellerUsername, username), eq(sellerInventory.status, "active")];
+    if (genreFilter.length > 0) conditions.push(jsonArrayHasAny(releases.genres, genreFilter));
+    if (styleFilter.length > 0) conditions.push(jsonArrayHasAny(releases.styles, styleFilter));
+    if (formatFilter.length > 0) conditions.push(jsonFormatNameHasAny(releases.formats, formatFilter));
+    if (countryFilter.length > 0) conditions.push(inArray(releases.country, countryFilter));
+    if (yearMin !== undefined) conditions.push(gte(releases.year, yearMin));
+    if (yearMax !== undefined) conditions.push(lte(releases.year, yearMax));
+    const whereClause = and(...conditions);
 
     const total = deps.db
       .select({ count: sql<number>`count(*)` })
@@ -120,12 +242,24 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .where(whereClause)
       .all()[0]!.count;
 
+    const orderExpr = sortColumn(sortField);
+    const orderBy = isDescending ? desc(orderExpr) : asc(orderExpr);
+
     const rows = deps.db
       .select({
         releaseId: sellerInventory.releaseId,
         title: releases.title,
         thumb: releases.thumb,
         year: releases.year,
+        country: releases.country,
+        genres: releases.genres,
+        styles: releases.styles,
+        formats: releases.formats,
+        ratingAverage: releases.ratingAverage,
+        ratingCount: releases.ratingCount,
+        haves: releases.haves,
+        wants: releases.wants,
+        artists: releases.artists,
         status: sellerInventory.status,
         firstSeenAt: sellerInventory.firstSeenAt,
         soldAt: sellerInventory.soldAt,
@@ -133,7 +267,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .from(sellerInventory)
       .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
       .where(whereClause)
-      .orderBy(sellerInventory.releaseId)
+      .orderBy(orderBy, sellerInventory.releaseId)
       .limit(pageSize)
       .offset((page - 1) * pageSize)
       .all();
@@ -144,6 +278,15 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
         title: row.title,
         thumb: row.thumb,
         year: row.year,
+        country: row.country,
+        genres: row.genres,
+        styles: row.styles,
+        formats: row.formats,
+        ratingAverage: row.ratingAverage,
+        ratingCount: row.ratingCount,
+        haves: row.haves,
+        wants: row.wants,
+        artists: row.artists,
         status: row.status,
         firstSeenAt: row.firstSeenAt.toISOString(),
         soldAt: row.soldAt?.toISOString() ?? null,

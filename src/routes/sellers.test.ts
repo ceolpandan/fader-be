@@ -148,19 +148,54 @@ describe("sellers routes", () => {
     });
   });
 
+  describe("GET /sellers", () => {
+    it("lists every seller that has ever been indexed", async () => {
+      await request(app).post("/sellers/seller-a/index").send();
+      await request(app).post("/sellers/seller-b/index").send();
+      db.update(sellers).set({ lastIndexStatus: "success" }).where(eq(sellers.username, "seller-a")).run();
+
+      const res = await request(app).get("/sellers");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ username: "seller-a", lastIndexStatus: "success" }),
+          expect.objectContaining({ username: "seller-b", lastIndexStatus: "running" }),
+        ]),
+      );
+      expect(res.body).toHaveLength(2);
+    });
+
+    it("returns an empty array when no seller has ever been indexed", async () => {
+      const res = await request(app).get("/sellers");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+  });
+
   describe("GET /sellers/:username/inventory", () => {
-    function seedRelease(id: number, title: string) {
+    function seedRelease(
+      id: number,
+      title: string,
+      overrides: Partial<{
+        year: number | null;
+        country: string | null;
+        genres: string[];
+        styles: string[];
+        formats: { name: string; descriptions: string[] }[];
+        artists: { id: number; name: string }[];
+      }> = {},
+    ) {
       db.insert(releases)
         .values({
           id,
           title,
-          year: 2000,
-          country: null,
-          genres: [],
-          styles: [],
-          formats: [],
+          year: overrides.year ?? 2000,
+          country: overrides.country ?? null,
+          genres: overrides.genres ?? [],
+          styles: overrides.styles ?? [],
+          formats: overrides.formats ?? [],
           labelIds: [],
-          artists: [],
+          artists: overrides.artists ?? [],
         })
         .run();
     }
@@ -197,7 +232,7 @@ describe("sellers routes", () => {
       expect(res.body.total).toBe(0);
     });
 
-    it("defaults to status=active and excludes sold listings", async () => {
+    it("always excludes sold listings and returns only active ones", async () => {
       seedRelease(1, "Active Release");
       seedRelease(2, "Sold Release");
       seedInventoryRow(1, "active");
@@ -209,19 +244,28 @@ describe("sellers routes", () => {
       expect(res.body.total).toBe(1);
     });
 
-    it("returns sold listings when status=sold, and both when status=all", async () => {
+    it("ignores a status query param — sold listings never come back", async () => {
       seedRelease(1, "Active Release");
       seedRelease(2, "Sold Release");
       seedInventoryRow(1, "active");
       seedInventoryRow(2, "sold");
 
-      const soldRes = await request(app).get("/sellers/some-seller/inventory?status=sold");
-      expect(soldRes.body.items).toHaveLength(1);
-      expect(soldRes.body.items[0]).toMatchObject({ releaseId: 2, status: "sold" });
+      const res = await request(app).get("/sellers/some-seller/inventory?status=all");
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0]).toMatchObject({ releaseId: 1, status: "active" });
+      expect(res.body.total).toBe(1);
+    });
 
-      const allRes = await request(app).get("/sellers/some-seller/inventory?status=all");
-      expect(allRes.body.items).toHaveLength(2);
-      expect(allRes.body.total).toBe(2);
+    it("filters by country (OR-matched, comma-separated)", async () => {
+      seedRelease(1, "UK Release", { country: "UK" });
+      seedRelease(2, "US Release", { country: "US" });
+      seedRelease(3, "German Release", { country: "Germany" });
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      seedInventoryRow(3, "active");
+
+      const res = await request(app).get("/sellers/some-seller/inventory?country=UK,US");
+      expect(res.body.items.map((i: { releaseId: number }) => i.releaseId).sort()).toEqual([1, 2]);
     });
 
     it("paginates with page/pageSize", async () => {
@@ -235,6 +279,125 @@ describe("sellers routes", () => {
       const res = await request(app).get("/sellers/some-seller/inventory?page=2&pageSize=2");
       expect(res.body.items).toHaveLength(1);
       expect(res.body).toMatchObject({ page: 2, pageSize: 2, total: 3 });
+    });
+
+    it("returns the extended release columns on each item", async () => {
+      seedRelease(1, "Full Release", {
+        genres: ["Rock"],
+        styles: ["Prog Rock"],
+        formats: [{ name: "Vinyl", descriptions: ["LP", "Album"] }],
+        artists: [{ id: 99, name: "Some Artist" }],
+      });
+      seedInventoryRow(1, "active");
+
+      const res = await request(app).get("/sellers/some-seller/inventory");
+      expect(res.body.items[0]).toMatchObject({
+        genres: ["Rock"],
+        styles: ["Prog Rock"],
+        formats: [{ name: "Vinyl", descriptions: ["LP", "Album"] }],
+        artists: [{ id: 99, name: "Some Artist" }],
+      });
+    });
+
+    it("filters by genre, style, and format (OR-matched, comma-separated)", async () => {
+      seedRelease(1, "Rock LP", { genres: ["Rock"], formats: [{ name: "Vinyl", descriptions: [] }] });
+      seedRelease(2, "Jazz CD", { genres: ["Jazz"], formats: [{ name: "CD", descriptions: [] }] });
+      seedRelease(3, "Electronic Tape", { genres: ["Electronic"], formats: [{ name: "Cassette", descriptions: [] }] });
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      seedInventoryRow(3, "active");
+
+      const genreRes = await request(app).get("/sellers/some-seller/inventory?genre=Rock,Jazz");
+      expect(genreRes.body.items.map((i: { releaseId: number }) => i.releaseId).sort()).toEqual([1, 2]);
+
+      const formatRes = await request(app).get("/sellers/some-seller/inventory?format=Vinyl");
+      expect(formatRes.body.items.map((i: { releaseId: number }) => i.releaseId)).toEqual([1]);
+    });
+
+    it("filters by yearMin/yearMax", async () => {
+      seedRelease(1, "Old", { year: 1980 });
+      seedRelease(2, "Mid", { year: 2000 });
+      seedRelease(3, "New", { year: 2020 });
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      seedInventoryRow(3, "active");
+
+      const res = await request(app).get("/sellers/some-seller/inventory?yearMin=1990&yearMax=2010");
+      expect(res.body.items.map((i: { releaseId: number }) => i.releaseId)).toEqual([2]);
+    });
+
+    it("rejects an invalid sort value with 400", async () => {
+      const res = await request(app).get("/sellers/some-seller/inventory?sort=bogus");
+      expect(res.status).toBe(400);
+    });
+
+    it("sorts by year descending and stays correct across pages", async () => {
+      seedRelease(1, "A", { year: 1990 });
+      seedRelease(2, "B", { year: 2010 });
+      seedRelease(3, "C", { year: 2000 });
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      seedInventoryRow(3, "active");
+
+      const page1 = await request(app).get("/sellers/some-seller/inventory?sort=-year&page=1&pageSize=2");
+      expect(page1.body.items.map((i: { year: number }) => i.year)).toEqual([2010, 2000]);
+
+      const page2 = await request(app).get("/sellers/some-seller/inventory?sort=-year&page=2&pageSize=2");
+      expect(page2.body.items.map((i: { year: number }) => i.year)).toEqual([1990]);
+    });
+  });
+
+  describe("GET /sellers/:username/inventory/facets", () => {
+    it("returns distinct genres, styles, format names, and countries across the seller's full inventory", async () => {
+      db.insert(releases)
+        .values([
+          {
+            id: 1,
+            title: "R1",
+            year: 2000,
+            country: "UK",
+            genres: ["Rock", "Pop"],
+            styles: ["Prog Rock"],
+            formats: [{ name: "Vinyl", descriptions: ["LP"] }],
+            labelIds: [],
+            artists: [],
+          },
+          {
+            id: 2,
+            title: "R2",
+            year: 2001,
+            country: "US",
+            genres: ["Rock"],
+            styles: ["Indie Rock"],
+            formats: [{ name: "CD", descriptions: [] }],
+            labelIds: [],
+            artists: [],
+          },
+        ])
+        .run();
+
+      const now = new Date();
+      db.insert(sellerInventory)
+        .values([
+          { sellerUsername: "some-seller", releaseId: 1, status: "active", firstSeenAt: now, lastSeenAt: now, soldAt: null },
+          { sellerUsername: "some-seller", releaseId: 2, status: "sold", firstSeenAt: now, lastSeenAt: now, soldAt: now },
+        ])
+        .run();
+
+      const res = await request(app).get("/sellers/some-seller/inventory/facets");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        genres: ["Pop", "Rock"],
+        styles: ["Indie Rock", "Prog Rock"],
+        formats: ["CD", "Vinyl"],
+        countries: ["UK", "US"],
+      });
+    });
+
+    it("returns empty arrays for a seller with no inventory", async () => {
+      const res = await request(app).get("/sellers/unknown-seller/inventory/facets");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ genres: [], styles: [], formats: [], countries: [] });
     });
   });
 });

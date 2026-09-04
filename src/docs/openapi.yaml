@@ -6,9 +6,10 @@ info:
     Boundary between the extension and Discogs' API. Wraps GET /releases/{id},
     GET /masters/{id}, and POST /fade — release/master DTOs are currently
     unscoped (all Discogs response fields kept as-is). Also exposes
-    /sellers/{username}/... endpoints that trigger and report on indexing a
-    Discogs seller's marketplace inventory into a local database, via a
-    Discogs-rate-limited background queue (internal only, not documented here).
+    /sellers/... endpoints that list indexed sellers, trigger and report on
+    indexing a Discogs seller's marketplace inventory into a local database
+    via a Discogs-rate-limited background queue, and browse/filter/sort the
+    resulting inventory.
 paths:
   /releases/{id}:
     get:
@@ -100,6 +101,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /sellers:
+    get:
+      operationId: listSellers
+      summary: List every seller that has ever been indexed
+      responses:
+        "200":
+          description: Sellers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SellerSummaryDto"
   /sellers/{username}/index:
     post:
       operationId: startSellerIndexing
@@ -152,19 +166,13 @@ paths:
   /sellers/{username}/inventory:
     get:
       operationId: getSellerInventory
-      summary: List a seller's indexed inventory (already-enriched releases only)
+      summary: List a seller's active, indexed inventory (already-enriched releases only)
       parameters:
         - name: username
           in: path
           required: true
           schema:
             type: string
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [active, sold, all]
-            default: active
         - name: page
           in: query
           schema:
@@ -175,6 +183,50 @@ paths:
           schema:
             type: integer
             default: 50
+        - name: genre
+          in: query
+          description: Comma-separated genre names, OR-matched
+          schema:
+            type: string
+        - name: style
+          in: query
+          description: Comma-separated style names, OR-matched
+          schema:
+            type: string
+        - name: format
+          in: query
+          description: Comma-separated format names (e.g. Vinyl, CD), OR-matched
+          schema:
+            type: string
+        - name: country
+          in: query
+          description: Comma-separated country names, OR-matched
+          schema:
+            type: string
+        - name: yearMin
+          in: query
+          schema:
+            type: integer
+        - name: yearMax
+          in: query
+          schema:
+            type: integer
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum:
+              [
+                title,
+                -title,
+                year,
+                -year,
+                artist,
+                -artist,
+                format,
+                -format,
+              ]
+            default: title
       responses:
         "200":
           description: Paginated inventory
@@ -188,6 +240,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /sellers/{username}/inventory/facets:
+    get:
+      operationId: getSellerInventoryFacets
+      summary: >
+        Distinct genres, styles, format names, and countries present across a
+        seller's full inventory (all statuses; not affected by any inventory
+        filters).
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Facets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerInventoryFacetsDto"
 
 components:
   schemas:
@@ -204,6 +276,34 @@ components:
       properties:
         username: { type: string }
         runId: { type: string }
+
+    SellerSummaryDto:
+      type: object
+      required: [username, lastIndexedAt, lastIndexStatus]
+      properties:
+        username: { type: string }
+        lastIndexedAt:
+          type: string
+          nullable: true
+        lastIndexStatus:
+          type: string
+          enum: [never, running, success, error]
+
+    ReleaseFormatDto:
+      type: object
+      required: [name, descriptions]
+      properties:
+        name: { type: string }
+        descriptions:
+          type: array
+          items: { type: string }
+
+    ReleaseArtistDto:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
 
     SellerStatusDto:
       type: object
@@ -232,7 +332,25 @@ components:
 
     SellerInventoryItemDto:
       type: object
-      required: [releaseId, title, thumb, year, status, firstSeenAt, soldAt]
+      required:
+        [
+          releaseId,
+          title,
+          thumb,
+          year,
+          country,
+          genres,
+          styles,
+          formats,
+          ratingAverage,
+          ratingCount,
+          haves,
+          wants,
+          artists,
+          status,
+          firstSeenAt,
+          soldAt,
+        ]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -242,6 +360,35 @@ components:
         year:
           type: integer
           nullable: true
+        country:
+          type: string
+          nullable: true
+        genres:
+          type: array
+          items: { type: string }
+        styles:
+          type: array
+          items: { type: string }
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseFormatDto"
+        ratingAverage:
+          type: number
+          nullable: true
+        ratingCount:
+          type: integer
+          nullable: true
+        haves:
+          type: integer
+          nullable: true
+        wants:
+          type: integer
+          nullable: true
+        artists:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseArtistDto"
         status:
           type: string
           enum: [active, sold]
@@ -261,6 +408,23 @@ components:
         page: { type: integer }
         pageSize: { type: integer }
         total: { type: integer }
+
+    SellerInventoryFacetsDto:
+      type: object
+      required: [genres, styles, formats, countries]
+      properties:
+        genres:
+          type: array
+          items: { type: string }
+        styles:
+          type: array
+          items: { type: string }
+        formats:
+          type: array
+          items: { type: string }
+        countries:
+          type: array
+          items: { type: string }
 
     FadeRequestDto:
       type: object
