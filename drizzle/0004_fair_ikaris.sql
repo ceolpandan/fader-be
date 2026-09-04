@@ -1,0 +1,1 @@
+ALTER TABLE `sellers` ADD `current_run_id` text;

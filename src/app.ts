@@ -1,18 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import swaggerUi from "swagger-ui-express";
+import type { Db } from "./db/client";
 import { requestLogger } from "./middleware/request-logger";
+import type { DiscogsQueue } from "./queue/discogs-queue";
 import { fadeRouter } from "./routes/fade";
 import { mastersRouter } from "./routes/masters";
 import { releasesRouter } from "./routes/releases";
+import { createSellersRouter } from "./routes/sellers";
 import { logger } from "./util/logger";
 
 const openapiPath = path.join(__dirname, "docs", "openapi.yaml");
 const openapiSpec = yaml.load(fs.readFileSync(openapiPath, "utf8")) as Record<string, unknown>;
 
-export function createApp(): Express {
+export interface AppDeps {
+  db: Db;
+  queue: DiscogsQueue;
+}
+
+export function createApp(deps: AppDeps): Express {
   const app = express();
 
   app.use(requestLogger);
@@ -26,6 +34,7 @@ export function createApp(): Express {
   app.use("/releases", releasesRouter);
   app.use("/masters", mastersRouter);
   app.use("/fade", fadeRouter);
+  app.use("/sellers", createSellersRouter(deps));
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });

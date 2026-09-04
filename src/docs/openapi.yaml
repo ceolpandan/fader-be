@@ -3,10 +3,12 @@ info:
   title: discogs-fade-backend
   version: 0.1.0
   description: >
-    Boundary between the extension and Discogs' API. Wraps GET /releases/{id}
-    and GET /masters/{id}. All Discogs response fields are currently passed
-    through unscoped (see fader-be/tasks/df-003-endpoint-scope.md for the
-    deferred trim-down pass).
+    Boundary between the extension and Discogs' API. Wraps GET /releases/{id},
+    GET /masters/{id}, and POST /fade — release/master DTOs are currently
+    unscoped (all Discogs response fields kept as-is). Also exposes
+    /sellers/{username}/... endpoints that trigger and report on indexing a
+    Discogs seller's marketplace inventory into a local database, via a
+    Discogs-rate-limited background queue (internal only, not documented here).
 paths:
   /releases/{id}:
     get:
@@ -98,6 +100,94 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /sellers/{username}/index:
+    post:
+      operationId: startSellerIndexing
+      summary: >
+        Start (or re-trigger) indexing a Discogs seller's inventory. Fetches
+        their full marketplace inventory and enriches each release, through
+        the rate-limited Discogs request queue, in the background.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Indexing started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexStartedDto"
+        "409":
+          description: Indexing is already running for this seller
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /sellers/{username}:
+    get:
+      operationId: getSellerStatus
+      summary: Get a seller's indexing status and progress
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Seller status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerStatusDto"
+        "404":
+          description: This username has never been indexed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /sellers/{username}/inventory:
+    get:
+      operationId: getSellerInventory
+      summary: List a seller's indexed inventory (already-enriched releases only)
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, sold, all]
+            default: active
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Paginated inventory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerInventoryPageDto"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
 
 components:
   schemas:
@@ -107,6 +197,70 @@ components:
       properties:
         error:
           type: string
+
+    IndexStartedDto:
+      type: object
+      required: [username, runId]
+      properties:
+        username: { type: string }
+        runId: { type: string }
+
+    SellerStatusDto:
+      type: object
+      required:
+        [
+          username,
+          lastIndexedAt,
+          lastIndexStatus,
+          currentlyRunning,
+          totalReleasesFound,
+          releasesEnriched,
+          releasesFailed,
+        ]
+      properties:
+        username: { type: string }
+        lastIndexedAt:
+          type: string
+          nullable: true
+        lastIndexStatus:
+          type: string
+          enum: [never, running, success, error]
+        currentlyRunning: { type: boolean }
+        totalReleasesFound: { type: integer }
+        releasesEnriched: { type: integer }
+        releasesFailed: { type: integer }
+
+    SellerInventoryItemDto:
+      type: object
+      required: [releaseId, title, thumb, year, status, firstSeenAt, soldAt]
+      properties:
+        releaseId: { type: integer }
+        title: { type: string }
+        thumb:
+          type: string
+          nullable: true
+        year:
+          type: integer
+          nullable: true
+        status:
+          type: string
+          enum: [active, sold]
+        firstSeenAt: { type: string }
+        soldAt:
+          type: string
+          nullable: true
+
+    SellerInventoryPageDto:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SellerInventoryItemDto"
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
 
     FadeRequestDto:
       type: object

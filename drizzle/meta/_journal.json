@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1788553605522,
+      "tag": "0000_simple_ser_duncan",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788553633330,
+      "tag": "0001_rare_ultimatum",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788553659172,
+      "tag": "0002_wandering_doctor_octopus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788553684548,
+      "tag": "0003_empty_thunderball",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788555266410,
+      "tag": "0004_fair_ikaris",
+      "breakpoints": true
+    }
+  ]
+}

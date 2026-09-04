@@ -150,6 +150,56 @@ export interface DiscogsMasterVersionsResponse {
   versions: DiscogsMasterVersion[];
 }
 
+export interface DiscogsInventoryPagination {
+  page: number;
+  pages: number;
+  per_page: number;
+  items: number;
+  urls: {
+    first?: string;
+    last?: string;
+    prev?: string;
+    next?: string;
+  };
+}
+
+export interface DiscogsInventoryListingRelease {
+  id: number;
+  resource_url: string;
+  catalog_number?: string;
+  year?: number;
+  description: string;
+}
+
+export interface DiscogsInventoryListing {
+  id: number;
+  status: string;
+  price: {
+    currency: string;
+    value: number;
+  };
+  allow_offers?: boolean;
+  sleeve_condition?: string;
+  condition: string;
+  posted?: string;
+  ships_from?: string;
+  uri?: string;
+  comments?: string;
+  seller: {
+    username: string;
+    resource_url: string;
+    id: number;
+  };
+  release: DiscogsInventoryListingRelease;
+  resource_url: string;
+  audio?: boolean;
+}
+
+export interface DiscogsInventoryPage {
+  pagination: DiscogsInventoryPagination;
+  listings: DiscogsInventoryListing[];
+}
+
 export interface DiscogsMaster {
   id: number;
   main_release?: number;
