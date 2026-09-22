@@ -12,6 +12,28 @@ import { DiscogsQueue } from "../queue/discogs-queue";
 import { checkRunCompletion } from "../indexing/run-completion";
 import { createApp } from "../app";
 
+const { verifyIdToken } = vi.hoisted(() => ({ verifyIdToken: vi.fn() }));
+
+vi.mock("firebase-admin/app", () => ({
+  cert: vi.fn(),
+  getApps: vi.fn(() => []),
+  initializeApp: vi.fn(),
+}));
+
+vi.mock("firebase-admin/auth", () => ({
+  getAuth: vi.fn(() => ({ verifyIdToken })),
+}));
+
+const TEST_TOKEN = "test-token";
+
+function authedRequest(app: Express) {
+  const agent = request(app);
+  return {
+    get: (url: string) => agent.get(url).set("Authorization", `Bearer ${TEST_TOKEN}`),
+    post: (url: string) => agent.post(url).set("Authorization", `Bearer ${TEST_TOKEN}`),
+  };
+}
+
 describe("sellers routes", () => {
   let dbPath: string;
   let db: Db;
@@ -27,6 +49,13 @@ describe("sellers routes", () => {
     app = createApp({ db, queue });
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+
+    process.env.FIREBASE_PROJECT_ID = "test-project";
+    process.env.FIREBASE_CLIENT_EMAIL = "test@test-project.iam.gserviceaccount.com";
+    process.env.FIREBASE_PRIVATE_KEY = "test-key";
+    process.env.ALLOWED_EMAILS = "dp.ceolpan@gmail.com";
+    verifyIdToken.mockReset();
+    verifyIdToken.mockResolvedValue({ uid: "test-uid", email: "dp.ceolpan@gmail.com" });
   });
 
   afterEach(() => {
@@ -40,7 +69,7 @@ describe("sellers routes", () => {
 
   describe("POST /sellers/:username/index", () => {
     it("returns 202 with a runId and enqueues the first inventory_page job", async () => {
-      const res = await request(app).post("/sellers/some-seller/index").send();
+      const res = await authedRequest(app).post("/sellers/some-seller/index").send();
 
       expect(res.status).toBe(202);
       expect(res.body).toEqual({ username: "some-seller", runId: expect.any(String) });
@@ -61,15 +90,15 @@ describe("sellers routes", () => {
     });
 
     it("returns 409 if indexing is already running for that username", async () => {
-      const first = await request(app).post("/sellers/some-seller/index").send();
+      const first = await authedRequest(app).post("/sellers/some-seller/index").send();
       expect(first.status).toBe(202);
 
-      const second = await request(app).post("/sellers/some-seller/index").send();
+      const second = await authedRequest(app).post("/sellers/some-seller/index").send();
       expect(second.status).toBe(409);
     });
 
     it("allows re-indexing once the previous run has finished", async () => {
-      const first = await request(app).post("/sellers/some-seller/index").send();
+      const first = await authedRequest(app).post("/sellers/some-seller/index").send();
       expect(first.status).toBe(202);
 
       db.update(sellers)
@@ -77,19 +106,19 @@ describe("sellers routes", () => {
         .where(eq(sellers.username, "some-seller"))
         .run();
 
-      const second = await request(app).post("/sellers/some-seller/index").send();
+      const second = await authedRequest(app).post("/sellers/some-seller/index").send();
       expect(second.status).toBe(202);
     });
   });
 
   describe("GET /sellers/:username", () => {
     it("returns 404 for a username that has never been indexed", async () => {
-      const res = await request(app).get("/sellers/unknown-seller");
+      const res = await authedRequest(app).get("/sellers/unknown-seller");
       expect(res.status).toBe(404);
     });
 
     it("reflects live release_detail job counts for the current run as they change", async () => {
-      const started = await request(app).post("/sellers/some-seller/index").send();
+      const started = await authedRequest(app).post("/sellers/some-seller/index").send();
       const { runId } = started.body as { runId: string };
 
       const now = new Date();
@@ -110,7 +139,7 @@ describe("sellers routes", () => {
       const jobA = insertJob(1);
       const jobB = insertJob(2);
 
-      let res = await request(app).get("/sellers/some-seller");
+      let res = await authedRequest(app).get("/sellers/some-seller");
       expect(res.body).toMatchObject({
         currentlyRunning: true,
         totalReleasesFound: 2,
@@ -121,7 +150,7 @@ describe("sellers routes", () => {
       db.update(discogsQueueJobs).set({ status: "done" }).where(eq(discogsQueueJobs.id, jobA.id)).run();
       db.update(discogsQueueJobs).set({ status: "failed" }).where(eq(discogsQueueJobs.id, jobB.id)).run();
 
-      res = await request(app).get("/sellers/some-seller");
+      res = await authedRequest(app).get("/sellers/some-seller");
       expect(res.body).toMatchObject({
         currentlyRunning: true,
         totalReleasesFound: 2,
@@ -134,12 +163,12 @@ describe("sellers routes", () => {
       queue.registerHandler("inventory_page", vi.fn(async () => {}));
       queue.registerHandler("release_detail", vi.fn(async () => {}));
 
-      await request(app).post("/sellers/some-seller/index").send();
+      await authedRequest(app).post("/sellers/some-seller/index").send();
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
 
-      const res = await request(app).get("/sellers/some-seller");
+      const res = await authedRequest(app).get("/sellers/some-seller");
       expect(res.body).toMatchObject({
         lastIndexStatus: "success",
         currentlyRunning: false,
@@ -150,11 +179,11 @@ describe("sellers routes", () => {
 
   describe("GET /sellers", () => {
     it("lists every seller that has ever been indexed", async () => {
-      await request(app).post("/sellers/seller-a/index").send();
-      await request(app).post("/sellers/seller-b/index").send();
+      await authedRequest(app).post("/sellers/seller-a/index").send();
+      await authedRequest(app).post("/sellers/seller-b/index").send();
       db.update(sellers).set({ lastIndexStatus: "success" }).where(eq(sellers.username, "seller-a")).run();
 
-      const res = await request(app).get("/sellers");
+      const res = await authedRequest(app).get("/sellers");
       expect(res.status).toBe(200);
       expect(res.body).toEqual(
         expect.arrayContaining([
@@ -166,7 +195,7 @@ describe("sellers routes", () => {
     });
 
     it("returns an empty array when no seller has ever been indexed", async () => {
-      const res = await request(app).get("/sellers");
+      const res = await authedRequest(app).get("/sellers");
       expect(res.status).toBe(200);
       expect(res.body).toEqual([]);
     });
@@ -227,7 +256,7 @@ describe("sellers routes", () => {
         })
         .run();
 
-      const res = await request(app).get("/sellers/some-seller/inventory");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory");
       expect(res.body.items).toEqual([]);
       expect(res.body.total).toBe(0);
     });
@@ -238,7 +267,7 @@ describe("sellers routes", () => {
       seedInventoryRow(1, "active");
       seedInventoryRow(2, "sold");
 
-      const res = await request(app).get("/sellers/some-seller/inventory");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory");
       expect(res.body.items).toHaveLength(1);
       expect(res.body.items[0]).toMatchObject({ releaseId: 1, title: "Active Release", status: "active" });
       expect(res.body.total).toBe(1);
@@ -250,7 +279,7 @@ describe("sellers routes", () => {
       seedInventoryRow(1, "active");
       seedInventoryRow(2, "sold");
 
-      const res = await request(app).get("/sellers/some-seller/inventory?status=all");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory?status=all");
       expect(res.body.items).toHaveLength(1);
       expect(res.body.items[0]).toMatchObject({ releaseId: 1, status: "active" });
       expect(res.body.total).toBe(1);
@@ -264,7 +293,7 @@ describe("sellers routes", () => {
       seedInventoryRow(2, "active");
       seedInventoryRow(3, "active");
 
-      const res = await request(app).get("/sellers/some-seller/inventory?country=UK,US");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory?country=UK,US");
       expect(res.body.items.map((i: { releaseId: number }) => i.releaseId).sort()).toEqual([1, 2]);
     });
 
@@ -276,7 +305,7 @@ describe("sellers routes", () => {
       seedInventoryRow(2, "active");
       seedInventoryRow(3, "active");
 
-      const res = await request(app).get("/sellers/some-seller/inventory?page=2&pageSize=2");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory?page=2&pageSize=2");
       expect(res.body.items).toHaveLength(1);
       expect(res.body).toMatchObject({ page: 2, pageSize: 2, total: 3 });
     });
@@ -290,7 +319,7 @@ describe("sellers routes", () => {
       });
       seedInventoryRow(1, "active");
 
-      const res = await request(app).get("/sellers/some-seller/inventory");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory");
       expect(res.body.items[0]).toMatchObject({
         genres: ["Rock"],
         styles: ["Prog Rock"],
@@ -307,10 +336,10 @@ describe("sellers routes", () => {
       seedInventoryRow(2, "active");
       seedInventoryRow(3, "active");
 
-      const genreRes = await request(app).get("/sellers/some-seller/inventory?genre=Rock,Jazz");
+      const genreRes = await authedRequest(app).get("/sellers/some-seller/inventory?genre=Rock,Jazz");
       expect(genreRes.body.items.map((i: { releaseId: number }) => i.releaseId).sort()).toEqual([1, 2]);
 
-      const formatRes = await request(app).get("/sellers/some-seller/inventory?format=Vinyl");
+      const formatRes = await authedRequest(app).get("/sellers/some-seller/inventory?format=Vinyl");
       expect(formatRes.body.items.map((i: { releaseId: number }) => i.releaseId)).toEqual([1]);
     });
 
@@ -322,12 +351,12 @@ describe("sellers routes", () => {
       seedInventoryRow(2, "active");
       seedInventoryRow(3, "active");
 
-      const res = await request(app).get("/sellers/some-seller/inventory?yearMin=1990&yearMax=2010");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory?yearMin=1990&yearMax=2010");
       expect(res.body.items.map((i: { releaseId: number }) => i.releaseId)).toEqual([2]);
     });
 
     it("rejects an invalid sort value with 400", async () => {
-      const res = await request(app).get("/sellers/some-seller/inventory?sort=bogus");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory?sort=bogus");
       expect(res.status).toBe(400);
     });
 
@@ -339,10 +368,10 @@ describe("sellers routes", () => {
       seedInventoryRow(2, "active");
       seedInventoryRow(3, "active");
 
-      const page1 = await request(app).get("/sellers/some-seller/inventory?sort=-year&page=1&pageSize=2");
+      const page1 = await authedRequest(app).get("/sellers/some-seller/inventory?sort=-year&page=1&pageSize=2");
       expect(page1.body.items.map((i: { year: number }) => i.year)).toEqual([2010, 2000]);
 
-      const page2 = await request(app).get("/sellers/some-seller/inventory?sort=-year&page=2&pageSize=2");
+      const page2 = await authedRequest(app).get("/sellers/some-seller/inventory?sort=-year&page=2&pageSize=2");
       expect(page2.body.items.map((i: { year: number }) => i.year)).toEqual([1990]);
     });
   });
@@ -384,7 +413,7 @@ describe("sellers routes", () => {
         ])
         .run();
 
-      const res = await request(app).get("/sellers/some-seller/inventory/facets");
+      const res = await authedRequest(app).get("/sellers/some-seller/inventory/facets");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
         genres: ["Pop", "Rock"],
@@ -395,7 +424,7 @@ describe("sellers routes", () => {
     });
 
     it("returns empty arrays for a seller with no inventory", async () => {
-      const res = await request(app).get("/sellers/unknown-seller/inventory/facets");
+      const res = await authedRequest(app).get("/sellers/unknown-seller/inventory/facets");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ genres: [], styles: [], formats: [], countries: [] });
     });

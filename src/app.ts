@@ -5,6 +5,7 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import * as yaml from "js-yaml";
 import swaggerUi from "swagger-ui-express";
 import type { Db } from "./db/client";
+import { firebaseAuth } from "./middleware/firebase-auth";
 import { requestLogger } from "./middleware/request-logger";
 import type { DiscogsQueue } from "./queue/discogs-queue";
 import { fadeRouter } from "./routes/fade";
@@ -33,14 +34,16 @@ export function createApp(deps: AppDeps): Express {
   });
   app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
 
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  app.use(firebaseAuth);
+
   app.use("/releases", releasesRouter);
   app.use("/masters", mastersRouter);
   app.use("/fade", fadeRouter);
   app.use("/sellers", createSellersRouter(deps));
-
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok" });
-  });
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- express requires 4-arg error handlers
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
