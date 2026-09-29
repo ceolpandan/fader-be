@@ -55,6 +55,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /releases/{id}/refresh:
+    post:
+      operationId: refreshRelease
+      summary: >
+        Force-refresh a release: fetch it live from Discogs (ahead of any
+        background indexing in the queue), overwrite everything stored for it,
+        and return the fresh release.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Release refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseDetailDto"
+        "400":
+          description: Invalid id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Release not found on Discogs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Discogs fetch failed after retries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "504":
+          description: Timed out waiting for the Discogs fetch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /fade:
     post:
       operationId: fade
