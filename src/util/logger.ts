@@ -46,13 +46,22 @@ export function colorDuration(ms: number): string {
   return color(GRAY, `${ms}ms`);
 }
 
+/** Who a logged HTTP call is with: our own API (FADER) or live Discogs (DISCOGS). */
+export type HttpSource = "FADER" | "DISCOGS";
+
+function colorSource(source: HttpSource): string {
+  return color((source === "FADER" ? CYAN : MAGENTA) + BOLD, source);
+}
+
 export const logger = {
-  request(method: string, url: string): void {
-    console.log(`${timestamp()} ${color(GRAY, "→")} ${colorMethod(method)} ${url}`);
-  },
-  response(method: string, url: string, status: number, ms: number): void {
+  request(source: HttpSource, method: string, url: string): void {
     console.log(
-      `${timestamp()} ${color(GRAY, "←")} ${colorMethod(method)} ${url} ` +
+      `${timestamp()} ${colorSource(source)} ${color(GRAY, "→")} ${colorMethod(method)} ${url}`,
+    );
+  },
+  response(source: HttpSource, method: string, url: string, status: number, ms: number): void {
+    console.log(
+      `${timestamp()} ${colorSource(source)} ${color(GRAY, "←")} ${colorMethod(method)} ${url} ` +
         `${colorStatus(status)} ${colorDuration(ms)}`,
     );
   },
