@@ -10,6 +10,18 @@ export interface ReleaseArtistStub {
   name: string;
 }
 
+export interface ReleaseTrack {
+  position: string;
+  title: string;
+  duration?: string;
+}
+
+export interface ReleaseVideo {
+  uri: string;
+  title?: string;
+  duration?: number;
+}
+
 export const releases = sqliteTable("releases", {
   id: integer("id").primaryKey(),
   title: text("title").notNull(),
@@ -26,6 +38,8 @@ export const releases = sqliteTable("releases", {
   wants: integer("wants"),
   labelIds: text("label_ids", { mode: "json" }).$type<number[]>().notNull(),
   artists: text("artists", { mode: "json" }).$type<ReleaseArtistStub[]>().notNull(),
+  tracklist: text("tracklist", { mode: "json" }).$type<ReleaseTrack[]>().notNull().default([]),
+  videos: text("videos", { mode: "json" }).$type<ReleaseVideo[]>().notNull().default([]),
 });
 
 export type SellerIndexStatus = "never" | "running" | "success" | "error";
@@ -80,6 +94,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
     .$type<InventoryPagePayload | ReleaseDetailPayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
+  priority: integer("priority").notNull().default(0),
   attempts: integer("attempts").notNull().default(0),
   errorMessage: text("error_message"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),

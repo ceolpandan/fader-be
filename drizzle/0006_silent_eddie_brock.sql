@@ -1,0 +1,1 @@
+ALTER TABLE `discogs_queue_jobs` ADD `priority` integer DEFAULT 0 NOT NULL;

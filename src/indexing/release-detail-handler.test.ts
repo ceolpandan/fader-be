@@ -106,7 +106,56 @@ describe("release_detail handler", () => {
       wants: 50,
       labelIds: [5],
       artists: [{ id: 1, name: "The Persuader" }],
+      tracklist: [{ position: "A1", title: "Track One", duration: "5:00" }],
+      videos: [{ uri: "https://youtube.com/x" }],
     });
+  });
+
+  it("keeps only position/title/duration per track and uri/title/duration per video", async () => {
+    const getRelease = async (): Promise<DiscogsRelease> => ({
+      ...rawRelease,
+      tracklist: [
+        {
+          position: "B1",
+          type_: "track",
+          title: "Track Two",
+          duration: "6:10",
+          extraartists: [{ id: 2, name: "Extra Artist", resource_url: "https://x" }],
+        },
+      ],
+      videos: [
+        {
+          uri: "https://youtube.com/y",
+          title: "Track Two (video)",
+          description: "desc",
+          duration: 370,
+          embed: true,
+        },
+      ],
+    });
+    const handler = createReleaseDetailHandler({ db, getRelease });
+
+    await handler({ releaseId: 732194 }, { runId: "run-1", jobId: 1 });
+
+    const [row] = db.select().from(releases).where(eq(releases.id, 732194)).all();
+    expect(row!.tracklist).toEqual([{ position: "B1", title: "Track Two", duration: "6:10" }]);
+    expect(row!.videos).toEqual([
+      { uri: "https://youtube.com/y", title: "Track Two (video)", duration: 370 },
+    ]);
+  });
+
+  it("persists empty arrays when Discogs has no tracklist or videos", async () => {
+    const withoutMedia: DiscogsRelease = { ...rawRelease };
+    delete withoutMedia.tracklist;
+    delete withoutMedia.videos;
+    const getRelease = async (): Promise<DiscogsRelease> => withoutMedia;
+    const handler = createReleaseDetailHandler({ db, getRelease });
+
+    await handler({ releaseId: 732194 }, { runId: "run-1", jobId: 1 });
+
+    const [row] = db.select().from(releases).where(eq(releases.id, 732194)).all();
+    expect(row!.tracklist).toEqual([]);
+    expect(row!.videos).toEqual([]);
   });
 
   it("throws NonRetryableError (does not retry) on a 404 from Discogs", async () => {
@@ -144,6 +193,8 @@ describe("release_detail handler", () => {
         formats: [],
         labelIds: [],
         artists: [],
+        tracklist: [{ position: "1", title: "Old Track" }],
+        videos: [],
       })
       .run();
 
@@ -155,5 +206,6 @@ describe("release_detail handler", () => {
     const [row] = db.select().from(releases).where(eq(releases.id, 732194)).all();
     expect(row!.title).toBe("Stockholm");
     expect(row!.year).toBe(1998);
+    expect(row!.tracklist).toEqual([{ position: "A1", title: "Track One", duration: "5:00" }]);
   });
 });

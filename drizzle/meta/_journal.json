@@ -36,6 +36,20 @@
       "when": 1788555266410,
       "tag": "0004_fair_ikaris",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790713416080,
+      "tag": "0005_happy_pepper_potts",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790713741072,
+      "tag": "0006_silent_eddie_brock",
+      "breakpoints": true
     }
   ]
 }

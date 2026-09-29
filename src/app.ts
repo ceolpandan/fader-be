@@ -10,7 +10,7 @@ import { requestLogger } from "./middleware/request-logger";
 import type { DiscogsQueue } from "./queue/discogs-queue";
 import { fadeRouter } from "./routes/fade";
 import { mastersRouter } from "./routes/masters";
-import { releasesRouter } from "./routes/releases";
+import { createReleasesRouter } from "./routes/releases";
 import { createSellersRouter } from "./routes/sellers";
 import { logger } from "./util/logger";
 
@@ -40,7 +40,7 @@ export function createApp(deps: AppDeps): Express {
 
   app.use(firebaseAuth);
 
-  app.use("/releases", releasesRouter);
+  app.use("/releases", createReleasesRouter(deps));
   app.use("/masters", mastersRouter);
   app.use("/fade", fadeRouter);
   app.use("/sellers", createSellersRouter(deps));

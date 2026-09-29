@@ -57,6 +57,7 @@ describe("discogs_queue_jobs table", () => {
       type: "inventory_page",
       payload: { username: "some-seller", page: 1, runStartedAt: now.toISOString() },
       status: "pending",
+      priority: 0,
       attempts: 0,
       errorMessage: null,
       createdAt: now,
