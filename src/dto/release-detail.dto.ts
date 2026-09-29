@@ -5,6 +5,9 @@ export interface ReleaseDetailDto {
   id: number;
   title: string;
   thumb?: string;
+  year: number | null;
+  genres?: string[];
+  styles?: string[];
   artists: ReleaseArtistStub[];
   tracklist: ReleaseTrack[];
   videos: ReleaseVideo[];

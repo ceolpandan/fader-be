@@ -623,11 +623,18 @@ components:
       description: >
         Served from our own database (fetched live from Discogs and saved on
         first request if the release is not indexed yet).
-      required: [id, title, artists, tracklist, videos]
+      required: [id, title, year, artists, tracklist, videos]
       properties:
         id: { type: integer }
         title: { type: string }
         thumb: { type: string }
+        year: { type: integer, nullable: true }
+        genres:
+          type: array
+          items: { type: string }
+        styles:
+          type: array
+          items: { type: string }
         artists:
           type: array
           items:
