@@ -4,6 +4,7 @@ import type {
   DiscogsMasterVersionsResponse,
   DiscogsRelease,
 } from "./types/discogs-api";
+import { logger } from "./util/logger";
 
 const DISCOGS_API_BASE = "https://api.discogs.com";
 const USER_AGENT = "discogs-fade-backend/0.1 +https://github.com/discogs-fade";
@@ -16,7 +17,10 @@ async function discogsGet<T>(path: string): Promise<T> {
     headers.Authorization = `Discogs token=${process.env.DISCOGS_TOKEN}`;
   }
 
+  logger.request("DISCOGS", "GET", path);
+  const start = Date.now();
   const res = await fetch(`${DISCOGS_API_BASE}${path}`, { headers });
+  logger.response("DISCOGS", "GET", path, res.status, Date.now() - start);
 
   if (res.status === 404) {
     throw new DiscogsNotFoundError(`Discogs resource not found: ${path}`);
