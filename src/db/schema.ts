@@ -94,6 +94,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
     .$type<InventoryPagePayload | ReleaseDetailPayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
+  priority: integer("priority").notNull().default(0),
   attempts: integer("attempts").notNull().default(0),
   errorMessage: text("error_message"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
