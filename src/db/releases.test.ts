@@ -41,6 +41,8 @@ describe("releases table", () => {
       wants: 50,
       labelIds: [1, 2],
       artists: [{ id: 1, name: "The Persuader" }],
+      tracklist: [{ position: "A1", title: "Track One", duration: "5:00" }],
+      videos: [{ uri: "https://youtube.com/x", title: "Track One", duration: 300 }],
     };
 
     db.insert(releases).values(row).run();
