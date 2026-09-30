@@ -9,6 +9,7 @@ export function mapReleaseRowToDto(row: typeof releases.$inferSelect): ReleaseDe
     title: row.title,
     ...(row.thumb ? { thumb: row.thumb } : {}),
     year: row.year,
+    country: row.country,
     genres: row.genres,
     styles: row.styles,
     artists: row.artists,

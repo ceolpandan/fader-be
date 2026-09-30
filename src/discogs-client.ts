@@ -1,5 +1,6 @@
 import type {
   DiscogsInventoryPage,
+  DiscogsUserProfile,
   DiscogsMaster,
   DiscogsMasterVersionsResponse,
   DiscogsRelease,
@@ -38,6 +39,10 @@ export function getRelease(releaseId: number) {
 
 export function getMaster(masterId: number) {
   return discogsGet<DiscogsMaster>(`/masters/${masterId}`);
+}
+
+export function getUserProfile(username: string) {
+  return discogsGet<DiscogsUserProfile>(`/users/${encodeURIComponent(username)}`);
 }
 
 export function getInventory(username: string, page: number) {

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createApp } from "./app";
 import { createDb } from "./db/client";
-import { getInventory, getRelease } from "./discogs-client";
+import { getInventory, getRelease, getUserProfile } from "./discogs-client";
 import { createInventoryPageHandler } from "./indexing/inventory-page-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
 import { checkRunCompletion } from "./indexing/run-completion";
@@ -28,7 +28,12 @@ const db = createDb(dbPath);
 const queue = new DiscogsQueue(db);
 queue.registerHandler(
   "inventory_page",
-  createInventoryPageHandler({ db, enqueue: (job) => queue.enqueue(job), getInventory }),
+  createInventoryPageHandler({
+    db,
+    enqueue: (job) => queue.enqueue(job),
+    getInventory,
+    getUserProfile,
+  }),
 );
 queue.registerHandler("release_detail", createReleaseDetailHandler({ db, getRelease }));
 queue.onSettled((job) => checkRunCompletion(db, job.runId));

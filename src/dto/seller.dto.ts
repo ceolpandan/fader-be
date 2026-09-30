@@ -24,6 +24,10 @@ export interface SellerStatusDto {
   totalReleasesFound: number;
   releasesEnriched: number;
   releasesFailed: number;
+  /** Seller rating as a percentage, e.g. 96.4. */
+  sellerRating: number | null;
+  sellerNumRatings: number | null;
+  shipsFromCountry: string | null;
 }
 
 export interface SellerInventoryItemDto {

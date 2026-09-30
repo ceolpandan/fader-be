@@ -5,8 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { releases, sellerInventory } from "../db/schema";
-import type { DiscogsInventoryPage } from "../types/discogs-api";
+import { releases, sellerInventory, sellers } from "../db/schema";
+import type { DiscogsInventoryPage, DiscogsUserProfile } from "../types/discogs-api";
 import { createInventoryPageHandler } from "./inventory-page-handler";
 import type { EnqueueInput } from "../queue/discogs-queue";
 
@@ -231,5 +231,63 @@ describe("inventory_page handler", () => {
     expect(row!.status).toBe("active");
     expect(row!.soldAt).toBeNull();
     expect(row!.firstSeenAt).toEqual(new Date("2025-11-01T00:00:00.000Z"));
+  });
+
+  describe("seller metadata on page 1", () => {
+    const runPage = (page: number, getUserProfile: (username: string) => Promise<DiscogsUserProfile>) => {
+      const inventory: DiscogsInventoryPage = {
+        pagination: { page, pages: 1, per_page: 100, items: 1, urls: {} },
+        listings: [{ ...listing(732194), ships_from: "Germany" }],
+      };
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: vi.fn(async () => inventory),
+        getUserProfile,
+      });
+      return handler(
+        { username: "some-seller", page, runStartedAt: "2026-01-01T00:00:00.000Z" },
+        { runId: "run-1", jobId: 1 },
+      );
+    };
+    const sellerRow = () => db.select().from(sellers).where(eq(sellers.username, "some-seller")).all()[0]!;
+
+    beforeEach(() => {
+      db.insert(sellers)
+        .values({ username: "some-seller", lastIndexStatus: "running", currentRunId: "run-1" })
+        .run();
+    });
+
+    it("stores rating and ships-from country", async () => {
+      await runPage(1, async () => ({
+        username: "some-seller",
+        seller_rating: 96.4,
+        seller_num_ratings: 174,
+      }));
+
+      expect(sellerRow()).toMatchObject({
+        sellerRating: 96.4,
+        sellerNumRatings: 174,
+        shipsFromCountry: "Germany",
+      });
+    });
+
+    it("still stores ships-from and does not fail when the profile fetch errors", async () => {
+      await runPage(1, async () => {
+        throw new Error("boom");
+      });
+
+      expect(sellerRow()).toMatchObject({
+        sellerRating: null,
+        sellerNumRatings: null,
+        shipsFromCountry: "Germany",
+      });
+    });
+
+    it("leaves seller metadata alone on later pages", async () => {
+      await runPage(2, async () => ({ username: "some-seller", seller_rating: 50, seller_num_ratings: 1 }));
+
+      expect(sellerRow().shipsFromCountry).toBeNull();
+    });
   });
 });

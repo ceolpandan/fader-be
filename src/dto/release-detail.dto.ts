@@ -6,6 +6,7 @@ export interface ReleaseDetailDto {
   title: string;
   thumb?: string;
   year: number | null;
+  country: string | null;
   genres?: string[];
   styles?: string[];
   artists: ReleaseArtistStub[];
