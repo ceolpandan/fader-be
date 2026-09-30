@@ -143,6 +143,9 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       totalReleasesFound: counts.pending + counts.processing + counts.done + counts.failed,
       releasesEnriched: counts.done,
       releasesFailed: counts.failed,
+      sellerRating: seller.sellerRating,
+      sellerNumRatings: seller.sellerNumRatings,
+      shipsFromCountry: seller.shipsFromCountry,
     };
     res.json(dto);
   });

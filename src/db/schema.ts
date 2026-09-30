@@ -49,6 +49,9 @@ export const sellers = sqliteTable("sellers", {
   lastIndexedAt: integer("last_indexed_at", { mode: "timestamp" }),
   lastIndexStatus: text("last_index_status").$type<SellerIndexStatus>().notNull(),
   currentRunId: text("current_run_id"),
+  sellerRating: real("seller_rating"),
+  sellerNumRatings: integer("seller_num_ratings"),
+  shipsFromCountry: text("ships_from_country"),
 });
 
 export type SellerInventoryStatus = "active" | "sold";

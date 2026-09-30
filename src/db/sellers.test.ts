@@ -30,6 +30,9 @@ describe("sellers table", () => {
       lastIndexedAt: null,
       lastIndexStatus: "never" as const,
       currentRunId: null,
+      sellerRating: null,
+      sellerNumRatings: null,
+      shipsFromCountry: null,
     };
 
     db.insert(sellers).values(row).run();

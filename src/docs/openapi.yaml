@@ -375,6 +375,9 @@ components:
           totalReleasesFound,
           releasesEnriched,
           releasesFailed,
+          sellerRating,
+          sellerNumRatings,
+          shipsFromCountry,
         ]
       properties:
         username: { type: string }
@@ -388,6 +391,12 @@ components:
         totalReleasesFound: { type: integer }
         releasesEnriched: { type: integer }
         releasesFailed: { type: integer }
+        sellerRating:
+          type: number
+          nullable: true
+          description: Seller rating as a percentage, e.g. 96.4.
+        sellerNumRatings: { type: integer, nullable: true }
+        shipsFromCountry: { type: string, nullable: true }
 
     SellerInventoryItemDto:
       type: object
@@ -623,12 +632,13 @@ components:
       description: >
         Served from our own database (fetched live from Discogs and saved on
         first request if the release is not indexed yet).
-      required: [id, title, year, artists, tracklist, videos]
+      required: [id, title, year, country, artists, tracklist, videos]
       properties:
         id: { type: integer }
         title: { type: string }
         thumb: { type: string }
         year: { type: integer, nullable: true }
+        country: { type: string, nullable: true }
         genres:
           type: array
           items: { type: string }

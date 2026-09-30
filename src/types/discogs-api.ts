@@ -150,6 +150,13 @@ export interface DiscogsMasterVersionsResponse {
   versions: DiscogsMasterVersion[];
 }
 
+export interface DiscogsUserProfile {
+  username: string;
+  /** Percentage, e.g. 96.4. Zero for users who have never sold. */
+  seller_rating?: number;
+  seller_num_ratings?: number;
+}
+
 export interface DiscogsInventoryPagination {
   page: number;
   pages: number;

@@ -117,6 +117,21 @@ describe("sellers routes", () => {
       expect(res.status).toBe(404);
     });
 
+    it("returns seller rating and ships-from country, null until indexed", async () => {
+      await authedRequest(app).post("/sellers/some-seller/index").send();
+
+      const before = await authedRequest(app).get("/sellers/some-seller");
+      expect(before.body).toMatchObject({ sellerRating: null, sellerNumRatings: null, shipsFromCountry: null });
+
+      db.update(sellers)
+        .set({ sellerRating: 96.4, sellerNumRatings: 174, shipsFromCountry: "Germany" })
+        .where(eq(sellers.username, "some-seller"))
+        .run();
+
+      const after = await authedRequest(app).get("/sellers/some-seller");
+      expect(after.body).toMatchObject({ sellerRating: 96.4, sellerNumRatings: 174, shipsFromCountry: "Germany" });
+    });
+
     it("reflects live release_detail job counts for the current run as they change", async () => {
       const started = await authedRequest(app).post("/sellers/some-seller/index").send();
       const { runId } = started.body as { runId: string };
