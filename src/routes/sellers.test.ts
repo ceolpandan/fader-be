@@ -360,6 +360,52 @@ describe("sellers routes", () => {
       expect(formatRes.body.items.map((i: { releaseId: number }) => i.releaseId)).toEqual([1]);
     });
 
+    it("excludes releases matching excludeGenre, excludeStyle, or excludeFormat, combined with includes", async () => {
+      seedRelease(1, "Minimal", { styles: ["Minimal"], genres: ["Electronic"], formats: [{ name: "Vinyl", descriptions: [] }] });
+      seedRelease(2, "Minimal Ambient", { styles: ["Minimal", "Ambient"], genres: ["Electronic"], formats: [{ name: "CD", descriptions: [] }] });
+      seedRelease(3, "Plain", { genres: ["Rock"] });
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      seedInventoryRow(3, "active");
+      const ids = (res: { body: { items: { releaseId: number }[] } }) => res.body.items.map((i) => i.releaseId).sort();
+
+      const styleRes = await authedRequest(app).get("/sellers/some-seller/inventory?style=Minimal&excludeStyle=Ambient");
+      expect(ids(styleRes)).toEqual([1]);
+      expect(styleRes.body.total).toBe(1);
+
+      const aloneRes = await authedRequest(app).get("/sellers/some-seller/inventory?excludeStyle=Ambient,Dub");
+      expect(ids(aloneRes)).toEqual([1, 3]);
+
+      const genreRes = await authedRequest(app).get("/sellers/some-seller/inventory?excludeGenre=Electronic");
+      expect(ids(genreRes)).toEqual([3]);
+
+      const formatRes = await authedRequest(app).get("/sellers/some-seller/inventory?excludeFormat=CD");
+      expect(ids(formatRes)).toEqual([1, 3]);
+    });
+
+    it("filters by onlyGenre, onlyStyle, or onlyFormat: every value on the release must be in the list", async () => {
+      seedRelease(1, "Pure", { genres: ["Electronic"], styles: ["Minimal"], formats: [{ name: "Vinyl", descriptions: [] }] });
+      seedRelease(2, "Mixed", { genres: ["Electronic", "Rock"], styles: ["Minimal", "Ambient"], formats: [{ name: "Vinyl", descriptions: [] }, { name: "CD", descriptions: [] }] });
+      seedRelease(3, "Untagged");
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      seedInventoryRow(3, "active");
+      const ids = (res: { body: { items: { releaseId: number }[] } }) => res.body.items.map((i) => i.releaseId).sort();
+
+      const genreRes = await authedRequest(app).get("/sellers/some-seller/inventory?onlyGenre=Electronic");
+      expect(ids(genreRes)).toEqual([1]);
+      expect(genreRes.body.total).toBe(1);
+
+      const multiRes = await authedRequest(app).get("/sellers/some-seller/inventory?onlyGenre=Electronic,Rock");
+      expect(ids(multiRes)).toEqual([1, 2]);
+
+      const styleRes = await authedRequest(app).get("/sellers/some-seller/inventory?onlyStyle=Minimal");
+      expect(ids(styleRes)).toEqual([1]);
+
+      const formatRes = await authedRequest(app).get("/sellers/some-seller/inventory?onlyFormat=Vinyl");
+      expect(ids(formatRes)).toEqual([1]);
+    });
+
     it("filters by yearMin/yearMax", async () => {
       seedRelease(1, "Old", { year: 1980 });
       seedRelease(2, "Mid", { year: 2000 });

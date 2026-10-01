@@ -252,6 +252,36 @@ paths:
           description: Comma-separated style names, OR-matched
           schema:
             type: string
+        - name: excludeGenre
+          in: query
+          description: Comma-separated genre names; releases with any of them are left out
+          schema:
+            type: string
+        - name: excludeStyle
+          in: query
+          description: Comma-separated style names; releases with any of them are left out
+          schema:
+            type: string
+        - name: excludeFormat
+          in: query
+          description: Comma-separated format names; releases with any of them are left out
+          schema:
+            type: string
+        - name: onlyGenre
+          in: query
+          description: Comma-separated genre names; keeps releases whose genres are all in the list
+          schema:
+            type: string
+        - name: onlyStyle
+          in: query
+          description: Comma-separated style names; keeps releases whose styles are all in the list
+          schema:
+            type: string
+        - name: onlyFormat
+          in: query
+          description: Comma-separated format names; keeps releases whose formats are all in the list
+          schema:
+            type: string
         - name: format
           in: query
           description: Comma-separated format names (e.g. Vinyl, CD), OR-matched
