@@ -46,6 +46,31 @@ function jsonFormatNameHasAny(column: SQLiteColumn, values: string[]): SQL {
   return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') IN (${placeholders}))`;
 }
 
+function jsonArrayHasNone(column: SQLiteColumn, values: string[]): SQL {
+  return sql`NOT ${jsonArrayHasAny(column, values)}`;
+}
+
+function jsonFormatNameHasNone(column: SQLiteColumn, values: string[]): SQL {
+  return sql`NOT ${jsonFormatNameHasAny(column, values)}`;
+}
+
+/** The array is non-empty and every value is in the list. */
+function jsonArrayOnly(column: SQLiteColumn, values: string[]): SQL {
+  const placeholders = sql.join(
+    values.map((v) => sql`${v}`),
+    sql`, `,
+  );
+  return sql`(json_array_length(${column}) > 0 AND NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE value NOT IN (${placeholders})))`;
+}
+
+function jsonFormatNameOnly(column: SQLiteColumn, values: string[]): SQL {
+  const placeholders = sql.join(
+    values.map((v) => sql`${v}`),
+    sql`, `,
+  );
+  return sql`(json_array_length(${column}) > 0 AND NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') NOT IN (${placeholders})))`;
+}
+
 function sortColumn(field: SortField) {
   switch (field) {
     case "title":
@@ -204,6 +229,12 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     const genreFilter = parseCommaSeparated(req.query.genre);
     const styleFilter = parseCommaSeparated(req.query.style);
     const formatFilter = parseCommaSeparated(req.query.format);
+    const onlyGenreFilter = parseCommaSeparated(req.query.onlyGenre);
+    const onlyStyleFilter = parseCommaSeparated(req.query.onlyStyle);
+    const onlyFormatFilter = parseCommaSeparated(req.query.onlyFormat);
+    const excludeGenreFilter =parseCommaSeparated(req.query.excludeGenre);
+    const excludeStyleFilter = parseCommaSeparated(req.query.excludeStyle);
+    const excludeFormatFilter = parseCommaSeparated(req.query.excludeFormat);
     const countryFilter = parseCommaSeparated(req.query.country);
 
     let yearMin: number | undefined;
@@ -235,6 +266,14 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     if (genreFilter.length > 0) conditions.push(jsonArrayHasAny(releases.genres, genreFilter));
     if (styleFilter.length > 0) conditions.push(jsonArrayHasAny(releases.styles, styleFilter));
     if (formatFilter.length > 0) conditions.push(jsonFormatNameHasAny(releases.formats, formatFilter));
+    if (onlyGenreFilter.length > 0) conditions.push(jsonArrayOnly(releases.genres, onlyGenreFilter));
+    if (onlyStyleFilter.length > 0) conditions.push(jsonArrayOnly(releases.styles, onlyStyleFilter));
+    if (onlyFormatFilter.length > 0) conditions.push(jsonFormatNameOnly(releases.formats, onlyFormatFilter));
+    if (excludeGenreFilter.length > 0) conditions.push(jsonArrayHasNone(releases.genres, excludeGenreFilter));
+    if (excludeStyleFilter.length > 0) conditions.push(jsonArrayHasNone(releases.styles, excludeStyleFilter));
+    if (excludeFormatFilter.length > 0) {
+      conditions.push(jsonFormatNameHasNone(releases.formats, excludeFormatFilter));
+    }
     if (countryFilter.length > 0) conditions.push(inArray(releases.country, countryFilter));
     if (yearMin !== undefined) conditions.push(gte(releases.year, yearMin));
     if (yearMax !== undefined) conditions.push(lte(releases.year, yearMax));
