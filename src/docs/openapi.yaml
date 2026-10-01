@@ -284,6 +284,8 @@ paths:
                 -artist,
                 format,
                 -format,
+                rating,
+                -rating,
               ]
             default: title
       responses:
