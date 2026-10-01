@@ -1,13 +1,18 @@
-export type FadeAction = "fade";
+import type { FadeKind } from "../db/schema";
 
+/** Provide exactly one of releaseId or masterId. */
 export interface FadeRequestDto {
   releaseId?: number;
   masterId?: number;
-  action?: FadeAction;
 }
 
+/** The stored fade: the master when the release has one, otherwise the release itself. */
 export interface FadeResponseDto {
-  releaseId?: number;
-  masterId?: number;
+  kind: FadeKind;
+  id: number;
+}
+
+export interface FadedIdsDto {
+  masterIds: number[];
   releaseIds: number[];
 }

@@ -53,7 +53,12 @@ export interface SellerInventoryPageDto {
   items: SellerInventoryItemDto[];
   page: number;
   pageSize: number;
+  /** Items matching the current filters (faded items already excluded). */
   total: number;
+  /** The seller's active, enriched items, faded ones included. Ignores filters. */
+  forSaleCount: number;
+  /** How many of `forSaleCount` are faded for the signed-in user. Ignores filters. */
+  fadedCount: number;
 }
 
 export interface SellerInventoryFacetsDto {

@@ -1,62 +1,78 @@
+import { eq } from "drizzle-orm";
 import { Router } from "express";
-import { DiscogsNotFoundError } from "../discogs-client";
-import type { FadeRequestDto, FadeResponseDto } from "../dto/fade.dto";
-import { resolveFadeFromMaster, resolveFadeFromRelease } from "../services/fade-resolver";
-import { formatIdList, highlightId, logger } from "../util/logger";
+import type { Db } from "../db/client";
+import { fades, releases } from "../db/schema";
+import type { FadedIdsDto, FadeRequestDto, FadeResponseDto } from "../dto/fade.dto";
+import { highlightId, logger } from "../util/logger";
 
-export const fadeRouter = Router();
+export interface FadeRouterDeps {
+  db: Db;
+}
 
-fadeRouter.post("/", async (req, res) => {
-  const body = req.body as Partial<FadeRequestDto>;
-  const action = body.action ?? "fade";
+export function createFadeRouter(deps: FadeRouterDeps): Router {
+  const router = Router();
 
-  if (action !== "fade") {
-    res.status(400).json({ error: `Unsupported action: ${String(action)}` });
-    return;
-  }
+  router.get("/", (req, res) => {
+    const rows = deps.db
+      .select({ kind: fades.kind, id: fades.id })
+      .from(fades)
+      .where(eq(fades.uid, req.user!.uid))
+      .all();
 
-  const hasReleaseId = body.releaseId !== undefined;
-  const hasMasterId = body.masterId !== undefined;
+    const dto: FadedIdsDto = {
+      masterIds: rows.filter((row) => row.kind === "master").map((row) => row.id),
+      releaseIds: rows.filter((row) => row.kind === "release").map((row) => row.id),
+    };
+    res.set("Cache-Control", "no-store").json(dto);
+  });
 
-  if (hasReleaseId === hasMasterId) {
-    res.status(400).json({ error: "Provide exactly one of releaseId or masterId" });
-    return;
-  }
+  router.post("/", (req, res) => {
+    const body = (req.body ?? {}) as Partial<FadeRequestDto>;
 
-  try {
+    const hasReleaseId = body.releaseId !== undefined;
+    const hasMasterId = body.masterId !== undefined;
+    if (hasReleaseId === hasMasterId) {
+      res.status(400).json({ error: "Provide exactly one of releaseId or masterId" });
+      return;
+    }
+
     let result: FadeResponseDto;
-
     if (hasReleaseId) {
       const releaseId = Number(body.releaseId);
       if (!Number.isInteger(releaseId)) {
         res.status(400).json({ error: "releaseId must be an integer" });
         return;
       }
-      result = await resolveFadeFromRelease(releaseId);
+      const release = deps.db
+        .select({ masterId: releases.masterId })
+        .from(releases)
+        .where(eq(releases.id, releaseId))
+        .get();
+      if (!release) {
+        res.status(404).json({ error: "Release not found" });
+        return;
+      }
+      result = release.masterId
+        ? { kind: "master", id: release.masterId }
+        : { kind: "release", id: releaseId };
     } else {
       const masterId = Number(body.masterId);
       if (!Number.isInteger(masterId)) {
         res.status(400).json({ error: "masterId must be an integer" });
         return;
       }
-      result = await resolveFadeFromMaster(masterId);
+      result = { kind: "master", id: masterId };
     }
 
-    const kind = hasReleaseId ? "release" : "master";
-    const sourceId = highlightId(hasReleaseId ? body.releaseId! : body.masterId!);
-    const masterId = result.masterId !== undefined ? highlightId(result.masterId) : "n/a";
-    logger.info(
-      `Faded ${kind} ${sourceId} → masterId=${masterId} ` +
-        `cascade(${result.releaseIds.length})=${formatIdList(result.releaseIds)}`,
-    );
+    deps.db
+      .insert(fades)
+      .values({ uid: req.user!.uid, kind: result.kind, id: result.id, createdAt: new Date() })
+      .onConflictDoNothing()
+      .run();
 
+    logger.info(`Faded ${result.kind} ${highlightId(result.id)}`);
     res.json(result);
-  } catch (err) {
-    if (err instanceof DiscogsNotFoundError) {
-      res.status(404).json({ error: "Not found" });
-      return;
-    }
-    logger.error("Failed to resolve fade ids from Discogs", err);
-    res.status(502).json({ error: "Failed to resolve fade ids from Discogs" });
-  }
-});
+  });
+
+  return router;
+}
