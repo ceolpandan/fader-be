@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-or
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { Router } from "express";
 import type { Db } from "../db/client";
+import { isFadedFor, isNotFadedFor } from "../db/fades";
 import { discogsQueueJobs, releases, sellerInventory, sellers } from "../db/schema";
 import type {
   IndexStartedDto,
@@ -179,6 +180,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
 
   router.get("/:username/inventory/facets", (req, res) => {
     const { username } = req.params;
+    const { uid } = req.user!;
 
     const rows = deps.db
       .select({
@@ -189,7 +191,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       })
       .from(sellerInventory)
       .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
-      .where(eq(sellerInventory.sellerUsername, username))
+      .where(and(eq(sellerInventory.sellerUsername, username), isNotFadedFor(uid)))
       .all();
 
     const genres = new Set<string>();
@@ -214,6 +216,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
 
   router.get("/:username/inventory", (req, res) => {
     const { username } = req.params;
+    const { uid } = req.user!;
 
     const page = Number(req.query.page ?? 1);
     const pageSize = Number(req.query.pageSize ?? 50);
@@ -262,7 +265,11 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     const isDescending = sortParam.startsWith("-");
     const sortField = (isDescending ? sortParam.slice(1) : sortParam) as SortField;
 
-    const conditions = [eq(sellerInventory.sellerUsername, username), eq(sellerInventory.status, "active")];
+    const forSaleConditions = [
+      eq(sellerInventory.sellerUsername, username),
+      eq(sellerInventory.status, "active"),
+    ];
+    const conditions = [...forSaleConditions, isNotFadedFor(uid)];
     if (genreFilter.length > 0) conditions.push(jsonArrayHasAny(releases.genres, genreFilter));
     if (styleFilter.length > 0) conditions.push(jsonArrayHasAny(releases.styles, styleFilter));
     if (formatFilter.length > 0) conditions.push(jsonFormatNameHasAny(releases.formats, formatFilter));
@@ -285,6 +292,16 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
       .where(whereClause)
       .all()[0]!.count;
+
+    const countForSale = (...extra: SQL[]) =>
+      deps.db
+        .select({ count: sql<number>`count(*)` })
+        .from(sellerInventory)
+        .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
+        .where(and(...forSaleConditions, ...extra))
+        .all()[0]!.count;
+    const forSaleCount = countForSale();
+    const fadedCount = countForSale(isFadedFor(uid));
 
     const orderExpr = sortColumn(sortField);
     const orderBy = isDescending ? desc(orderExpr) : asc(orderExpr);
@@ -340,6 +357,8 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       page,
       pageSize,
       total,
+      forSaleCount,
+      fadedCount,
     };
     res.json(dto);
   });

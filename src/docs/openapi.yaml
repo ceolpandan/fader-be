@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: >
     Boundary between the extension and Discogs' API. Wraps GET /masters/{id} and
-    POST /fade — master DTOs are currently unscoped (all Discogs response
+    GET and POST /fade — master DTOs are currently unscoped (all Discogs response
     fields kept as-is). GET /releases/{id} serves a trimmed release from our
     own database. Also exposes
     /sellers/... endpoints that list indexed sellers, trigger and report on
@@ -100,12 +100,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
   /fade:
+    get:
+      operationId: getFades
+      summary: List what the signed-in user has faded
+      description: >
+        Faded masters and releases without a master. A release is hidden when
+        its own id is in releaseIds or its master id is in masterIds, which
+        also covers versions added to a faded master later.
+      responses:
+        "200":
+          description: Faded ids
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FadedIdsDto"
     post:
       operationId: fade
       summary: >
-        Resolve a release id or a master id to every id that should be faded
-        from the page (the release plus its master and all sibling versions,
-        or all versions under a master).
+        Fade a release or a master for the signed-in user. A release with a
+        master is stored as that master, hiding every version under it.
+        Idempotent.
       requestBody:
         required: true
         content:
@@ -114,7 +128,7 @@ paths:
               $ref: "#/components/schemas/FadeRequestDto"
       responses:
         "200":
-          description: Ids resolved
+          description: Fade stored
           content:
             application/json:
               schema:
@@ -126,7 +140,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
         "404":
-          description: Release not found
+          description: Release is not indexed
           content:
             application/json:
               schema:
@@ -336,8 +350,8 @@ paths:
       operationId: getSellerInventoryFacets
       summary: >
         Distinct genres, styles, format names, and countries present across a
-        seller's full inventory (all statuses; not affected by any inventory
-        filters).
+        seller's full inventory (all statuses, faded items excluded; not
+        affected by any inventory filters).
       parameters:
         - name: username
           in: path
@@ -499,7 +513,7 @@ components:
 
     SellerInventoryPageDto:
       type: object
-      required: [items, page, pageSize, total]
+      required: [items, page, pageSize, total, forSaleCount, fadedCount]
       properties:
         items:
           type: array
@@ -507,7 +521,17 @@ components:
             $ref: "#/components/schemas/SellerInventoryItemDto"
         page: { type: integer }
         pageSize: { type: integer }
-        total: { type: integer }
+        total:
+          type: integer
+          description: Items matching the current filters, faded ones excluded.
+        forSaleCount:
+          type: integer
+          description: >
+            The seller's active, enriched items, faded ones included. Ignores
+            filters.
+        fadedCount:
+          type: integer
+          description: How many of forSaleCount are faded for the user. Ignores filters.
 
     SellerInventoryFacetsDto:
       type: object
@@ -534,23 +558,27 @@ components:
           type: integer
         masterId:
           type: integer
-        action:
-          type: string
-          enum: [fade]
-          default: fade
 
     FadeResponseDto:
       type: object
-      required: [releaseIds]
+      required: [kind, id]
       properties:
-        releaseId:
+        kind:
+          type: string
+          enum: [master, release]
+        id:
           type: integer
-        masterId:
-          type: integer
+
+    FadedIdsDto:
+      type: object
+      required: [masterIds, releaseIds]
+      properties:
+        masterIds:
+          type: array
+          items: { type: integer }
         releaseIds:
           type: array
-          items:
-            type: integer
+          items: { type: integer }
 
     Artist:
       type: object

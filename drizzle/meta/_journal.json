@@ -57,6 +57,13 @@
       "when": 1790801463673,
       "tag": "0007_slow_iron_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790888828708,
+      "tag": "0008_flippant_zombie",
+      "breakpoints": true
     }
   ]
 }

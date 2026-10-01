@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, real, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, real, primaryKey, index } from "drizzle-orm/sqlite-core";
 
 export interface ReleaseFormat {
   name: string;
@@ -40,7 +40,7 @@ export const releases = sqliteTable("releases", {
   artists: text("artists", { mode: "json" }).$type<ReleaseArtistStub[]>().notNull(),
   tracklist: text("tracklist", { mode: "json" }).$type<ReleaseTrack[]>().notNull().default([]),
   videos: text("videos", { mode: "json" }).$type<ReleaseVideo[]>().notNull().default([]),
-});
+}, (table) => [index("releases_master_id_idx").on(table.masterId)]);
 
 export type SellerIndexStatus = "never" | "running" | "success" | "error";
 
@@ -103,3 +103,17 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
+
+export type FadeKind = "master" | "release";
+
+/** What a user faded: a master (hides every version under it) or a release without a master. */
+export const fades = sqliteTable(
+  "fades",
+  {
+    uid: text("uid").notNull(),
+    kind: text("kind").$type<FadeKind>().notNull(),
+    id: integer("id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.uid, table.kind, table.id] })],
+);

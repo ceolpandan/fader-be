@@ -8,7 +8,7 @@ import type { Db } from "./db/client";
 import { firebaseAuth } from "./middleware/firebase-auth";
 import { requestLogger } from "./middleware/request-logger";
 import type { DiscogsQueue } from "./queue/discogs-queue";
-import { fadeRouter } from "./routes/fade";
+import { createFadeRouter } from "./routes/fade";
 import { mastersRouter } from "./routes/masters";
 import { createReleasesRouter } from "./routes/releases";
 import { createSellersRouter } from "./routes/sellers";
@@ -42,7 +42,7 @@ export function createApp(deps: AppDeps): Express {
 
   app.use("/releases", createReleasesRouter(deps));
   app.use("/masters", mastersRouter);
-  app.use("/fade", fadeRouter);
+  app.use("/fade", createFadeRouter(deps));
   app.use("/sellers", createSellersRouter(deps));
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- express requires 4-arg error handlers
