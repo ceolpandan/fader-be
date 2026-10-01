@@ -227,12 +227,14 @@ describe("sellers routes", () => {
         styles: string[];
         formats: { name: string; descriptions: string[] }[];
         artists: { id: number; name: string }[];
+        ratingAverage: number | null;
       }> = {},
     ) {
       db.insert(releases)
         .values({
           id,
           title,
+          ratingAverage: overrides.ratingAverage ?? null,
           year: overrides.year ?? 2000,
           country: overrides.country ?? null,
           genres: overrides.genres ?? [],
@@ -373,6 +375,21 @@ describe("sellers routes", () => {
     it("rejects an invalid sort value with 400", async () => {
       const res = await authedRequest(app).get("/sellers/some-seller/inventory?sort=bogus");
       expect(res.status).toBe(400);
+    });
+
+    it.each([
+      ["-rating", [4.5, 3.2, null]],
+      ["rating", [3.2, 4.5, null]],
+    ])("sorts by %s with unrated releases last", async (sort, expected) => {
+      seedRelease(1, "A", { ratingAverage: 3.2 });
+      seedRelease(2, "B");
+      seedRelease(3, "C", { ratingAverage: 4.5 });
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      seedInventoryRow(3, "active");
+
+      const res = await authedRequest(app).get(`/sellers/some-seller/inventory?sort=${sort}`);
+      expect(res.body.items.map((i: { ratingAverage: number | null }) => i.ratingAverage)).toEqual(expected);
     });
 
     it("sorts by year descending and stays correct across pages", async () => {

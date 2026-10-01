@@ -13,7 +13,7 @@ import type {
 } from "../dto/seller.dto";
 import type { DiscogsQueue } from "../queue/discogs-queue";
 
-const SORT_FIELDS = ["title", "year", "artist", "format"] as const;
+const SORT_FIELDS = ["title", "year", "artist", "format", "rating"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
 const SORT_OPTIONS = SORT_FIELDS.flatMap((field) => [field, `-${field}`]) as string[];
 
@@ -56,6 +56,8 @@ function sortColumn(field: SortField) {
       return sql`json_extract(${releases.artists}, '$[0].name')`;
     case "format":
       return sql`json_extract(${releases.formats}, '$[0].name')`;
+    case "rating":
+      return releases.ratingAverage;
   }
 }
 
@@ -247,6 +249,8 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
 
     const orderExpr = sortColumn(sortField);
     const orderBy = isDescending ? desc(orderExpr) : asc(orderExpr);
+    // Unrated releases are noise at either end of a rating sort, so they always go last.
+    const nullsLast = sortField === "rating" ? [sql`${orderExpr} IS NULL`] : [];
 
     const rows = deps.db
       .select({
@@ -270,7 +274,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .from(sellerInventory)
       .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
       .where(whereClause)
-      .orderBy(orderBy, sellerInventory.releaseId)
+      .orderBy(...nullsLast, orderBy, sellerInventory.releaseId)
       .limit(pageSize)
       .offset((page - 1) * pageSize)
       .all();
