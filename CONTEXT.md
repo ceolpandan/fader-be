@@ -42,11 +42,27 @@ _Avoid_: Crawl, scrape, sync
 Re-fetching one release from live Discogs and overwriting everything we store for it, regardless of when it was indexed. Not the same as a reindex, which covers a whole seller and skips releases already enriched.
 _Avoid_: Reindex (for a single release), resync, update
 
+**Scan**:
+The first phase of indexing: walking a seller's inventory pages to record which releases they have. Enriching the releases we don't have yet starts once it ends.
+_Avoid_: Crawl
+
+**Scan pass**:
+One sorted walk over a seller's inventory within a scan. Discogs serves only the first 100 pages (10,000 items) per sort order, so a seller over that gets a second pass in the opposite order. A pass ends **capped** when Discogs refuses to paginate any further.
+_Avoid_: Round, sweep
+
+**Coverage**:
+How many of the inventory items a seller lists a scan reached. It counts listings (copies for sale), not releases, because Discogs' total does.
+_Avoid_: Completeness, progress
+
 ## Discogs access
 
 **Discogs queue**:
 The single paced lane every Discogs request goes through, so we stay under Discogs' rate limit.
 _Avoid_: Job runner
+
+**Pause**:
+When Discogs errors (429, 5xx, network failure) the whole Discogs queue stops and retries the same job after 1, 2, 4, 8, then 10 minutes, or after Discogs' `Retry-After` when longer. A pause costs the job no attempts. After about an hour of continuous failure the queue gives up and every unfinished run ends in error.
+_Avoid_: Rate-limit wait, throttle
 
 **Inline request**:
 Work a person is actively waiting on, such as opening a release we don't have or refreshing one. It goes ahead of background indexing in the Discogs queue.
