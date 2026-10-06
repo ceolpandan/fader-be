@@ -1,6 +1,9 @@
 import type {
   ReleaseArtistStub,
   ReleaseFormat,
+  ScanOrder,
+  ScanPassStatus,
+  ScanSort,
   SellerIndexStatus,
   SellerInventoryStatus,
 } from "../db/schema";
@@ -41,6 +44,23 @@ export interface SellerStatusDto {
   backoffMs: number | null;
   /** Inventory items we can reach (Discogs caps pagination) out of all the seller lists. */
   coverage: { reachable: number; total: number } | null;
+  /** The sorted inventory passes of the current run, in the order they ran. */
+  scanPasses: ScanPassDto[];
+}
+
+export interface ScanPassDto {
+  sort: ScanSort;
+  order: ScanOrder;
+  /** `capped`: Discogs refused to paginate any further, so the pass ended cleanly. */
+  status: ScanPassStatus;
+  pagesPlanned: number;
+  pagesFetched: number;
+  /** Listings Discogs returned in this pass. */
+  itemsSeen: number;
+  /** Inventory links this pass was the first of the run to see. */
+  itemsNew: number;
+  startedAt: string;
+  endedAt: string | null;
 }
 
 export interface SellerInventoryItemDto {

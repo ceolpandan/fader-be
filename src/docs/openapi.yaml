@@ -442,6 +442,7 @@ components:
           retryingAt,
           backoffMs,
           coverage,
+          scanPasses,
         ]
       properties:
         username: { type: string }
@@ -490,6 +491,29 @@ components:
           properties:
             reachable: { type: integer }
             total: { type: integer }
+        scanPasses:
+          type: array
+          description: The sorted inventory passes of the current run, in the order they ran. A second, descending pass only runs when the first could not reach every item.
+          items:
+            $ref: "#/components/schemas/ScanPassDto"
+
+    ScanPassDto:
+      type: object
+      required:
+        [sort, order, status, pagesPlanned, pagesFetched, itemsSeen, itemsNew, startedAt, endedAt]
+      properties:
+        sort: { type: string, enum: [artist] }
+        order: { type: string, enum: [asc, desc] }
+        status:
+          type: string
+          enum: [running, done, capped]
+          description: capped means Discogs refused to paginate any further, so the pass ended cleanly.
+        pagesPlanned: { type: integer }
+        pagesFetched: { type: integer }
+        itemsSeen: { type: integer, description: Listings Discogs returned in this pass. }
+        itemsNew: { type: integer, description: Inventory links this pass was the first of the run to see. }
+        startedAt: { type: string }
+        endedAt: { type: string, nullable: true }
 
     SellerInventoryItemDto:
       type: object

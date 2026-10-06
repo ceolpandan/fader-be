@@ -4,19 +4,29 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { Router } from "express";
 import type { Db } from "../db/client";
 import { isFadedFor, isNotFadedFor } from "../db/fades";
-import { discogsQueueJobs, releases, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
 import type {
   IndexStartedDto,
   SellerInventoryFacetsDto,
   SellerInventoryPageDto,
   IndexingPhase,
+  ScanPassDto,
   SellerStatusDto,
   SellerSummaryDto,
 } from "../dto/seller.dto";
-import { MAX_SCAN_PAGES } from "../indexing/inventory-page-handler";
+import { MAX_REACHABLE_ITEMS } from "../indexing/inventory-page-handler";
 import type { DiscogsQueue } from "../queue/discogs-queue";
 
-const MAX_REACHABLE_ITEMS = MAX_SCAN_PAGES * 100;
+/**
+ * Inventory items the scan reaches. Once it has finished that is what its passes actually saw;
+ * until then (or for a run that predates scan passes) it is what the planned passes can reach.
+ */
+function reachableItems(total: number, passes: { itemsSeen: number }[], scanDone: boolean): number {
+  if (passes.length === 0) return Math.min(total, MAX_REACHABLE_ITEMS);
+  if (scanDone) return Math.min(total, passes.reduce((sum, pass) => sum + pass.itemsSeen, 0));
+  return Math.min(total, MAX_REACHABLE_ITEMS * (total > MAX_REACHABLE_ITEMS ? 2 : 1));
+}
+
 /** Completed release_detail jobs needed before an ETA is worth showing. */
 export const ETA_MIN_SAMPLES = 10;
 /** The ETA rate is taken from this many most recently completed jobs. */
@@ -203,6 +213,26 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       }
     }
 
+    const passes = seller.currentRunId
+      ? deps.db
+          .select()
+          .from(scanPasses)
+          .where(eq(scanPasses.runId, seller.currentRunId))
+          .orderBy(asc(scanPasses.id))
+          .all()
+      : [];
+    const scanPassDtos: ScanPassDto[] = passes.map((pass) => ({
+      sort: pass.sort,
+      order: pass.order,
+      status: pass.status,
+      pagesPlanned: pass.pagesPlanned,
+      pagesFetched: pass.pagesFetched,
+      itemsSeen: pass.itemsSeen,
+      itemsNew: pass.itemsNew,
+      startedAt: pass.startedAt.toISOString(),
+      endedAt: pass.endedAt?.toISOString() ?? null,
+    }));
+
     const running = seller.lastIndexStatus === "running";
     const phase: IndexingPhase = !running ? "done" : seller.scanCompletedAt ? "enriching" : "scanning";
     const remaining = counts.pending + counts.processing;
@@ -230,13 +260,11 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       etaSeconds,
       retryingAt: pause?.retryAt.toISOString() ?? null,
       backoffMs: pause?.backoffMs ?? null,
+      scanPasses: scanPassDtos,
       coverage:
         seller.inventoryTotal === null
           ? null
-          : {
-              reachable: Math.min(seller.inventoryTotal, MAX_REACHABLE_ITEMS),
-              total: seller.inventoryTotal,
-            },
+          : { reachable: reachableItems(seller.inventoryTotal, passes, seller.scanCompletedAt !== null), total: seller.inventoryTotal },
     };
     res.json(dto);
   });
