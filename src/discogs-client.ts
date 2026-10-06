@@ -12,21 +12,28 @@ const USER_AGENT = "discogs-fade-backend/0.1 +https://github.com/discogs-fade";
 
 export class DiscogsNotFoundError extends Error {}
 
-export const DEFAULT_RATE_LIMIT_PAUSE_MS = 60_000;
-
-/** Discogs answered 429; `retryAfterMs` is how long to stay off the API entirely. */
-export class DiscogsRateLimitError extends Error {
+/**
+ * A Discogs failure worth waiting out: a rate limit, a 5xx or a network error. The queue pauses
+ * and retries the same job instead of failing it. `retryAfterMs` is Discogs' `Retry-After`, if sent.
+ */
+export class DiscogsTransientError extends Error {
   constructor(
     message: string,
-    readonly retryAfterMs: number,
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
   }
 }
 
-function retryAfterMs(res: Response): number {
+/** Discogs answered 429. */
+export class DiscogsRateLimitError extends DiscogsTransientError {}
+
+/** Discogs rejected our token (401/403). Retrying cannot help, so the run fails. */
+export class DiscogsAuthError extends Error {}
+
+function retryAfterMs(res: Response): number | null {
   const seconds = Number(res.headers.get("Retry-After"));
-  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RATE_LIMIT_PAUSE_MS;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
 }
 
 async function discogsGet<T>(path: string): Promise<T> {
@@ -37,7 +44,12 @@ async function discogsGet<T>(path: string): Promise<T> {
 
   logger.request("DISCOGS", "GET", path);
   const start = Date.now();
-  const res = await fetch(`${DISCOGS_API_BASE}${path}`, { headers });
+  let res: Response;
+  try {
+    res = await fetch(`${DISCOGS_API_BASE}${path}`, { headers });
+  } catch (err) {
+    throw new DiscogsTransientError(`Discogs request failed for ${path}: ${String(err)}`);
+  }
   logger.response("DISCOGS", "GET", path, res.status, Date.now() - start);
 
   if (res.status === 404) {
@@ -48,6 +60,12 @@ async function discogsGet<T>(path: string): Promise<T> {
       `Discogs API error 429 for ${path}: ${await res.text()}`,
       retryAfterMs(res),
     );
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new DiscogsAuthError(`Discogs refused our token (${res.status}) for ${path}: ${await res.text()}`);
+  }
+  if (res.status >= 500) {
+    throw new DiscogsTransientError(`Discogs API error ${res.status} for ${path}`);
   }
   if (!res.ok) {
     throw new Error(`Discogs API error ${res.status} for ${path}: ${await res.text()}`);

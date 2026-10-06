@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs, sellers } from "../db/schema";
-import { checkRunCompletion } from "./run-completion";
+import { checkRunCompletion, markRunAborted } from "./run-completion";
 
 describe("checkRunCompletion", () => {
   let dbPath: string;
@@ -79,6 +79,19 @@ describe("checkRunCompletion", () => {
     seedJob("run-1", "inventory_page", "done", { username: "some-seller", page: 1, runStartedAt: "2026-01-01T00:00:00.000Z" });
 
     checkRunCompletion(db, "run-1");
+
+    const [row] = db.select().from(sellers).where(eq(sellers.username, "some-seller")).all();
+    expect(row!.lastIndexStatus).toBe("error");
+  });
+
+  it("markRunAborted flips the run's seller to error, even after the run-completion check marked it success", () => {
+    db.insert(sellers)
+      .values({ username: "some-seller", lastIndexStatus: "running", currentRunId: "run-1", lastIndexedAt: null })
+      .run();
+    seedJob("run-1", "inventory_page", "done", { username: "some-seller", page: 1, runStartedAt: "2026-01-01T00:00:00.000Z" });
+    checkRunCompletion(db, "run-1");
+
+    markRunAborted(db, "run-1");
 
     const [row] = db.select().from(sellers).where(eq(sellers.username, "some-seller")).all();
     expect(row!.lastIndexStatus).toBe("error");

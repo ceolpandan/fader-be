@@ -8,7 +8,7 @@ import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs, releases } from "../db/schema";
-import { DiscogsNotFoundError } from "../discogs-client";
+import { DiscogsNotFoundError, DiscogsTransientError } from "../discogs-client";
 import { createReleaseDetailHandler } from "../indexing/release-detail-handler";
 import { DEFAULT_WAIT_TIMEOUT_MS, DiscogsQueue, PACING_MS } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
@@ -208,6 +208,20 @@ describe("releases routes", () => {
 
     expect(res.status).toBe(502);
     expect(res.body).toEqual({ error: "Failed to fetch release from Discogs" });
+  });
+
+  it("returns 503 straight away while Discogs is erroring and the queue is paused", async () => {
+    getRelease.mockRejectedValue(new DiscogsTransientError("discogs is down"));
+    queue.start();
+
+    const first = await getWhileClockAdvances("/releases/732194", PACING_MS);
+    expect(first.status).toBe(503);
+    expect(first.body).toEqual({ error: "Discogs unavailable, retrying" });
+
+    const jobsBefore = db.select().from(discogsQueueJobs).all().length;
+    const second = await get("/releases/555");
+    expect(second.status).toBe(503);
+    expect(db.select().from(discogsQueueJobs).all().length).toBe(jobsBefore);
   });
 
   it("returns 504 when the queue does not get to the job in time", async () => {

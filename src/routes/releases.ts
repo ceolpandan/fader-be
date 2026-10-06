@@ -4,7 +4,12 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "../db/client";
 import { releases } from "../db/schema";
 import { mapReleaseRowToDto } from "../dto/mappers";
-import { NonRetryableError, QueueWaitTimeoutError, type DiscogsQueue } from "../queue/discogs-queue";
+import {
+  NonRetryableError,
+  QueueUnavailableError,
+  QueueWaitTimeoutError,
+  type DiscogsQueue,
+} from "../queue/discogs-queue";
 import { logger } from "../util/logger";
 
 export interface ReleasesRouterDeps {
@@ -33,6 +38,8 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
     } catch (err) {
       if (err instanceof NonRetryableError) {
         res.status(404).json({ error: "Release not found" });
+      } else if (err instanceof QueueUnavailableError) {
+        res.status(503).json({ error: "Discogs unavailable, retrying" });
       } else if (err instanceof QueueWaitTimeoutError) {
         res.status(504).json({ error: "Timed out waiting for release from Discogs" });
       } else {
