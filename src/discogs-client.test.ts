@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getInventory, DiscogsNotFoundError } from "./discogs-client";
+import { getInventory, DiscogsAuthError, DiscogsNotFoundError, DiscogsPaginationCapError } from "./discogs-client";
 import type { DiscogsInventoryPage } from "./types/discogs-api";
 
 function jsonResponse(status: number, body: unknown) {
@@ -50,11 +50,43 @@ describe("getInventory", () => {
     const result = await getInventory("some-seller", 1);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.discogs.com/users/some-seller/inventory?page=1&per_page=100",
+      "https://api.discogs.com/users/some-seller/inventory?page=1&per_page=100&sort=artist&sort_order=asc",
       expect.any(Object),
     );
     expect(result.pagination.pages).toBe(2);
     expect(result.listings[0]!.release.id).toBe(732194);
+  });
+
+  it("passes the requested sort and order", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { pagination: {}, listings: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getInventory("some-seller", 3, { sort: "artist", order: "desc" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.discogs.com/users/some-seller/inventory?page=3&per_page=100&sort=artist&sort_order=desc",
+      expect.any(Object),
+    );
+  });
+
+  it("throws DiscogsPaginationCapError on the page-100 pagination 403", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(403, { message: "Pagination above 100 disabled for inventories besides your own" }),
+      ),
+    );
+
+    await expect(getInventory("some-seller", 101)).rejects.toThrow(DiscogsPaginationCapError);
+  });
+
+  it("still throws DiscogsAuthError on any other 403", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { message: "You are not allowed to do this" })),
+    );
+
+    await expect(getInventory("some-seller", 1)).rejects.toThrow(DiscogsAuthError);
   });
 
   it("throws DiscogsNotFoundError on 404", async () => {

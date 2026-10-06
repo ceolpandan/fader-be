@@ -5,7 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { releases, sellerInventory, sellers } from "../db/schema";
+import { releases, scanPasses, sellerInventory, sellers } from "../db/schema";
+import { DiscogsPaginationCapError } from "../discogs-client";
 import type { DiscogsInventoryPage, DiscogsUserProfile } from "../types/discogs-api";
 import { createInventoryPageHandler } from "./inventory-page-handler";
 import type { EnqueueInput } from "../queue/discogs-queue";
@@ -99,7 +100,7 @@ describe("inventory_page handler", () => {
 
     await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
 
-    expect(getInventory).toHaveBeenCalledWith("some-seller", 1);
+    expect(getInventory).toHaveBeenCalledWith("some-seller", 1, { sort: "artist", order: "asc" });
     const [row] = db.select().from(sellerInventory).where(eq(sellerInventory.releaseId, 732194)).all();
     expect(row).toEqual({
       sellerUsername: "some-seller",
@@ -113,12 +114,12 @@ describe("inventory_page handler", () => {
     expect(enqueue).toHaveBeenCalledWith({
       runId: "run-1",
       type: "inventory_page",
-      payload: { username: "some-seller", page: 2, runStartedAt: RUN_STARTED },
+      payload: { username: "some-seller", page: 2, runStartedAt: RUN_STARTED, sort: "artist", order: "asc" },
     });
     expect(sellerRow().scanCompletedAt).toBeNull();
   });
 
-  it("records the inventory total and the pages to scan from page 1, and the page reached", async () => {
+  it("records the inventory total and the pages to scan (both passes) from page 1, and the page reached", async () => {
     const handler = createInventoryPageHandler({
       db,
       enqueue,
@@ -129,7 +130,7 @@ describe("inventory_page handler", () => {
 
     expect(sellerRow()).toMatchObject({
       inventoryTotal: 42_223,
-      scanPagesTotal: 100,
+      scanPagesTotal: 200,
       scanPagesFetched: 1,
     });
   });
@@ -206,6 +207,135 @@ describe("inventory_page handler", () => {
 
     expect(enqueue.mock.calls.map(([job]) => job.type)).toEqual(["release_detail"]);
     expect(sellerRow().scanCompletedAt).not.toBeNull();
+  });
+
+  describe("two-pass scan past the 10,000 item cap", () => {
+    const passRows = () => db.select().from(scanPasses).all();
+    const enqueuedPages = () => enqueue.mock.calls.map(([job]) => job).filter((job) => job.type === "inventory_page");
+
+    it("plans both passes' pages up front when the inventory exceeds the cap", async () => {
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: async () => inventoryPage(1, 423, [1], 42_223),
+      });
+
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+
+      expect(sellerRow().scanPagesTotal).toBe(200);
+      expect(passRows()).toMatchObject([
+        { sort: "artist", order: "asc", pagesPlanned: 100, pagesFetched: 1, itemsSeen: 1, itemsNew: 1, status: "running" },
+      ]);
+    });
+
+    it("plans only the pages the ascending pass left out when the inventory is just over the cap", async () => {
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: async () => inventoryPage(1, 150, [1], 10_250),
+      });
+
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+
+      expect(sellerRow().scanPagesTotal).toBe(103);
+    });
+
+    it("starts the descending pass after ascending page 100, without enriching yet", async () => {
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: async (_u, page) => inventoryPage(page, 423, [page], 42_223),
+      });
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+      enqueue.mockClear();
+
+      await handler({ username: "some-seller", page: 100, runStartedAt: RUN_STARTED }, ctx);
+
+      expect(enqueue.mock.calls.map(([job]) => job)).toEqual([
+        {
+          runId: "run-1",
+          type: "inventory_page",
+          payload: { username: "some-seller", page: 1, runStartedAt: RUN_STARTED, sort: "artist", order: "desc" },
+        },
+      ]);
+      expect(passRows()[0]).toMatchObject({ order: "asc", status: "done", endedAt: expect.any(Date) });
+      expect(sellerRow().scanCompletedAt).toBeNull();
+    });
+
+    it("fetches the descending pass with its own sort order and ends it after the pages it planned", async () => {
+      const getInventory = vi.fn(async (_u: string, page: number) => inventoryPage(page, 150, [1000 + page], 10_250));
+      const handler = createInventoryPageHandler({ db, enqueue, getInventory });
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+      db.update(scanPasses).set({ status: "done" }).run();
+      enqueue.mockClear();
+
+      for (let page = 1; page <= 3; page += 1) {
+        await handler({ username: "some-seller", page, runStartedAt: RUN_STARTED, sort: "artist", order: "desc" }, ctx);
+      }
+
+      expect(getInventory).toHaveBeenLastCalledWith("some-seller", 3, { sort: "artist", order: "desc" });
+      expect(enqueuedPages().map((job) => (job.payload as { page: number }).page)).toEqual([2, 3]);
+      expect(passRows().find((row) => row.order === "desc")).toMatchObject({
+        pagesPlanned: 3,
+        pagesFetched: 3,
+        status: "done",
+      });
+      expect(enqueue.mock.calls.filter(([job]) => job.type === "release_detail")).toHaveLength(3);
+      expect(sellerRow().scanCompletedAt).not.toBeNull();
+    });
+
+    it("counts a release both passes see once as new, and enriches it once", async () => {
+      knownRelease(2);
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: async (_u, page, scan) =>
+          scan.order === "asc" ? inventoryPage(page, 1, [1, 2], 10_100) : inventoryPage(page, 1, [2, 3], 10_100),
+      });
+
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED, order: "desc" }, ctx);
+
+      const rows = passRows();
+      expect(rows.find((r) => r.order === "asc")).toMatchObject({ itemsSeen: 2, itemsNew: 2 });
+      expect(rows.find((r) => r.order === "desc")).toMatchObject({ itemsSeen: 2, itemsNew: 1 });
+      const enriched = enqueue.mock.calls.map(([job]) => job).filter((job) => job.type === "release_detail");
+      expect(enriched.map((job) => job.payload)).toEqual([{ releaseId: 1 }, { releaseId: 3 }]);
+    });
+
+    it("ends the pass cleanly, without failing, when Discogs refuses to paginate", async () => {
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: async (_u, page) => {
+          if (page === 2) throw new DiscogsPaginationCapError("Pagination above 100 disabled");
+          return inventoryPage(page, 423, [page], 5_000);
+        },
+      });
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+      enqueue.mockClear();
+
+      await expect(
+        handler({ username: "some-seller", page: 2, runStartedAt: RUN_STARTED }, ctx),
+      ).resolves.toBeUndefined();
+
+      expect(passRows()[0]).toMatchObject({ status: "capped", endedAt: expect.any(Date) });
+      expect(sellerRow().scanCompletedAt).not.toBeNull();
+    });
+
+    it("still fails the job when Discogs refuses for any other reason", async () => {
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: async () => {
+          throw new Error("boom");
+        },
+      });
+
+      await expect(
+        handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx),
+      ).rejects.toThrow("boom");
+    });
   });
 
   describe("seller metadata on page 1", () => {

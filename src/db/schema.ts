@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, real, primaryKey, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, real, primaryKey, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export interface ReleaseFormat {
   name: string;
@@ -76,6 +76,33 @@ export const sellerInventory = sqliteTable(
   (table) => [primaryKey({ columns: [table.sellerUsername, table.releaseId] })],
 );
 
+export type ScanSort = "artist";
+export type ScanOrder = "asc" | "desc";
+/** `capped`: Discogs refused to paginate any further, so the pass ended cleanly. */
+export type ScanPassStatus = "running" | "done" | "capped";
+
+/** One sorted walk over a seller's inventory within an indexing run, kept for diagnosing coverage. */
+export const scanPasses = sqliteTable(
+  "scan_passes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id").notNull(),
+    sellerUsername: text("seller_username").notNull(),
+    sort: text("sort").$type<ScanSort>().notNull(),
+    order: text("order").$type<ScanOrder>().notNull(),
+    pagesPlanned: integer("pages_planned").notNull(),
+    pagesFetched: integer("pages_fetched").notNull().default(0),
+    /** Listings Discogs returned in this pass. */
+    itemsSeen: integer("items_seen").notNull().default(0),
+    /** Inventory links this pass was the first of the run to see. */
+    itemsNew: integer("items_new").notNull().default(0),
+    status: text("status").$type<ScanPassStatus>().notNull(),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp" }),
+  },
+  (table) => [uniqueIndex("scan_passes_run_sort_order_idx").on(table.runId, table.sort, table.order)],
+);
+
 export type QueueJobType = "inventory_page" | "release_detail";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
@@ -85,6 +112,9 @@ export interface InventoryPagePayload {
   /** ISO timestamp of when this indexing run started (page 1's enqueue time), carried
    * forward unchanged through every chained page — used as the sold-diff cutoff. */
   runStartedAt: string;
+  /** Sort of the pass this page belongs to; jobs queued before two-pass scanning omit it. */
+  sort?: ScanSort;
+  order?: ScanOrder;
 }
 
 export interface ReleaseDetailPayload {

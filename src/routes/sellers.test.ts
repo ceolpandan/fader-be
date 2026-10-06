@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, releases, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
 import { DiscogsTransientError } from "../discogs-client";
 import { DiscogsQueue, PACING_MS } from "../queue/discogs-queue";
 import { checkRunCompletion } from "../indexing/run-completion";
@@ -247,6 +247,90 @@ describe("sellers routes", () => {
           phase: "scanning",
           scan: { pagesFetched: 12, pagesTotal: 100 },
           coverage: { reachable: 10_000, total: 42_223 },
+        });
+      });
+
+      describe("scan passes", () => {
+        const pass = (runId: string, order: "asc" | "desc", itemsSeen: number, status: "running" | "done" | "capped") =>
+          db
+            .insert(scanPasses)
+            .values({
+              runId,
+              sellerUsername: "some-seller",
+              sort: "artist",
+              order,
+              pagesPlanned: 100,
+              pagesFetched: itemsSeen / 100,
+              itemsSeen,
+              itemsNew: itemsSeen,
+              status,
+              startedAt: new Date("2026-01-01T00:00:00.000Z"),
+              endedAt: status === "running" ? null : new Date("2026-01-01T00:02:00.000Z"),
+            })
+            .run();
+
+        it("lists the current run's passes in the order they ran", async () => {
+          const runId = await start();
+          pass(runId, "asc", 10_000, "done");
+          pass(runId, "desc", 5_000, "running");
+          pass("older-run", "asc", 777, "done");
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+
+          expect(res.body.scanPasses).toEqual([
+            {
+              sort: "artist",
+              order: "asc",
+              status: "done",
+              pagesPlanned: 100,
+              pagesFetched: 100,
+              itemsSeen: 10_000,
+              itemsNew: 10_000,
+              startedAt: "2026-01-01T00:00:00.000Z",
+              endedAt: "2026-01-01T00:02:00.000Z",
+            },
+            expect.objectContaining({ order: "desc", status: "running", endedAt: null }),
+          ]);
+        });
+
+        it("estimates coverage from the planned passes while scanning", async () => {
+          const runId = await start();
+          seller({ inventoryTotal: 42_223, scanPagesTotal: 200, scanPagesFetched: 12 });
+          pass(runId, "asc", 1_200, "running");
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+
+          expect(res.body.coverage).toEqual({ reachable: 20_000, total: 42_223 });
+        });
+
+        it("reports the items the passes actually saw once the scan has completed", async () => {
+          const runId = await start();
+          seller({ inventoryTotal: 42_223, scanCompletedAt: new Date() });
+          pass(runId, "asc", 10_000, "done");
+          pass(runId, "desc", 4_000, "capped");
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+
+          expect(res.body.coverage).toEqual({ reachable: 14_000, total: 42_223 });
+        });
+
+        it("never reports more than the seller lists", async () => {
+          const runId = await start();
+          seller({ inventoryTotal: 10_050, scanCompletedAt: new Date() });
+          pass(runId, "asc", 10_000, "done");
+          pass(runId, "desc", 100, "done");
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+
+          expect(res.body.coverage).toEqual({ reachable: 10_050, total: 10_050 });
+        });
+
+        it("has no passes before the scan starts", async () => {
+          await start();
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+
+          expect(res.body.scanPasses).toEqual([]);
         });
       });
 

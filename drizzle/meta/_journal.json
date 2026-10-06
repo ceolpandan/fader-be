@@ -71,6 +71,13 @@
       "when": 1791313237194,
       "tag": "0009_seller_scan_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791315601868,
+      "tag": "0010_scan_passes",
+      "breakpoints": true
     }
   ]
 }
