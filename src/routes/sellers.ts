@@ -145,26 +145,30 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     const runId = randomUUID();
     const runStartedAt = new Date().toISOString();
 
-    deps.db
-      .insert(sellers)
-      .values({ username, lastIndexStatus: "running", currentRunId: runId })
-      .onConflictDoUpdate({
-        target: sellers.username,
-        set: {
-          lastIndexStatus: "running",
-          currentRunId: runId,
-          inventoryTotal: null,
-          scanPagesTotal: null,
-          scanPagesFetched: 0,
-          scanCompletedAt: null,
-        },
-      })
-      .run();
+    // One transaction (a single connection, so the queue's insert joins it): a crash can't
+    // leave the seller `running` with no job to settle the run.
+    deps.db.transaction(() => {
+      deps.db
+        .insert(sellers)
+        .values({ username, lastIndexStatus: "running", currentRunId: runId })
+        .onConflictDoUpdate({
+          target: sellers.username,
+          set: {
+            lastIndexStatus: "running",
+            currentRunId: runId,
+            inventoryTotal: null,
+            scanPagesTotal: null,
+            scanPagesFetched: 0,
+            scanCompletedAt: null,
+          },
+        })
+        .run();
 
-    deps.queue.enqueue({
-      runId,
-      type: "inventory_page",
-      payload: { username, page: 1, runStartedAt },
+      deps.queue.enqueue({
+        runId,
+        type: "inventory_page",
+        payload: { username, page: 1, runStartedAt },
+      });
     });
 
     const dto: IndexStartedDto = { username, runId };

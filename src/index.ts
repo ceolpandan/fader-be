@@ -6,7 +6,7 @@ import { createDb } from "./db/client";
 import { getInventory, getRelease, getUserProfile } from "./discogs-client";
 import { createInventoryPageHandler } from "./indexing/inventory-page-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
-import { checkRunCompletion, markRunAborted } from "./indexing/run-completion";
+import { checkRunCompletion, failOrphanedRuns, markRunAborted } from "./indexing/run-completion";
 import { startSoldInventoryPurgeLoop } from "./indexing/sold-inventory-purge";
 import { DiscogsQueue } from "./queue/discogs-queue";
 import { logger } from "./util/logger";
@@ -39,6 +39,8 @@ queue.registerHandler("release_detail", createReleaseDetailHandler({ db, getRele
 queue.onSettled((job) => checkRunCompletion(db, job.runId));
 queue.onRunAborted((runId) => markRunAborted(db, runId));
 queue.start();
+const orphaned = failOrphanedRuns(db);
+if (orphaned > 0) logger.warn(`Marked ${orphaned} orphaned running seller(s) as error`);
 
 startSoldInventoryPurgeLoop(db);
 
