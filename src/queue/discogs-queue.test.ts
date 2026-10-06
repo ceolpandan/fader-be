@@ -52,7 +52,7 @@ describe("DiscogsQueue", () => {
     expect(row!.status).toBe("done");
   });
 
-  it("paces two consecutive jobs ~1017ms apart, serially", async () => {
+  it("paces two consecutive jobs PACING_MS apart, serially", async () => {
     const invokedAt: number[] = [];
     const handler = vi.fn(async () => {
       invokedAt.push(Date.now());
