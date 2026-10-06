@@ -8,7 +8,8 @@ import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs, releases, sellerInventory, sellers } from "../db/schema";
-import { DiscogsQueue } from "../queue/discogs-queue";
+import { DiscogsTransientError } from "../discogs-client";
+import { DiscogsQueue, PACING_MS } from "../queue/discogs-queue";
 import { checkRunCompletion } from "../indexing/run-completion";
 import { createApp } from "../app";
 
@@ -265,6 +266,75 @@ describe("sellers routes", () => {
         const res = await authedRequest(app).get("/sellers/some-seller");
         // 100 remaining at one job per 2s
         expect(res.body.etaSeconds).toBe(200);
+      });
+
+      it("ignores long pause gaps between completed jobs when estimating the pace", async () => {
+        const runId = await start();
+        seller({ scanCompletedAt: new Date() });
+        insertDoneJobs(runId, 10, 2000);
+        // a 10 minute Discogs pause sits between the older and the newer completions
+        const pauseAt = new Date(Date.now() - 60_000);
+        db.insert(discogsQueueJobs)
+          .values({
+            runId,
+            type: "release_detail",
+            payload: { releaseId: 500 },
+            status: "done",
+            createdAt: pauseAt,
+            updatedAt: new Date(pauseAt.getTime() - 600_000),
+          })
+          .run();
+        insertPendingJobs(runId, 100);
+
+        const res = await authedRequest(app).get("/sellers/some-seller");
+        expect(res.body.etaSeconds).toBe(200);
+      });
+
+      describe("while the Discogs queue is paused", () => {
+        // Starting an index also queued an inventory_page job, which the queue handles first.
+        const pauseQueue = async () => {
+          queue.registerHandler("inventory_page", async () => {});
+          queue.registerHandler("release_detail", async () => {
+            throw new DiscogsTransientError("discogs is down");
+          });
+          queue.start();
+          await vi.advanceTimersByTimeAsync(PACING_MS);
+        };
+
+        it("reports when the queue retries and how long the pause is", async () => {
+          const runId = await start();
+          insertPendingJobs(runId, 1);
+          await pauseQueue();
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+          expect(res.body).toMatchObject({
+            retryingAt: new Date(Date.now() + 60_000).toISOString(),
+            backoffMs: 60_000,
+            lastIndexStatus: "running",
+          });
+        });
+
+        it("adds the remaining pause to the ETA", async () => {
+          const runId = await start();
+          seller({ scanCompletedAt: new Date() });
+          insertDoneJobs(runId, 30, 2000);
+          insertPendingJobs(runId, 100);
+          await pauseQueue();
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+          // 100 remaining at one job per 2s, plus the 60s pause
+          expect(res.body.etaSeconds).toBe(260);
+        });
+
+        it("reports no pause for a seller that is not running", async () => {
+          const runId = await start();
+          insertPendingJobs(runId, 1);
+          await pauseQueue();
+          seller({ lastIndexStatus: "success" });
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+          expect(res.body).toMatchObject({ retryingAt: null, backoffMs: null });
+        });
       });
 
       it("is done and keeps its coverage after the run finishes", async () => {

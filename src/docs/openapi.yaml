@@ -49,6 +49,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is erroring and the queue is paused, retrying; try again shortly
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
         "504":
           description: Timed out waiting for the Discogs fetch
           content:
@@ -89,6 +95,12 @@ paths:
                 $ref: "#/components/schemas/ErrorDto"
         "502":
           description: Discogs fetch failed after retries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is erroring and the queue is paused, retrying; try again shortly
           content:
             application/json:
               schema:

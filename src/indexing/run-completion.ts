@@ -2,6 +2,14 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { discogsQueueJobs, sellers, type InventoryPagePayload } from "../db/schema";
 
+/** The run was cut short (Discogs gave up or refused our token): its seller ends in `error`, not `success`. */
+export function markRunAborted(db: Db, runId: string): void {
+  db.update(sellers)
+    .set({ lastIndexStatus: "error" })
+    .where(eq(sellers.currentRunId, runId))
+    .run();
+}
+
 /**
  * Called after any job settles (done/failed). If no job for `runId` is left
  * pending/processing, the run is complete: flip the owning seller's status to

@@ -21,6 +21,8 @@ const MAX_REACHABLE_ITEMS = MAX_SCAN_PAGES * 100;
 export const ETA_MIN_SAMPLES = 10;
 /** The ETA rate is taken from this many most recently completed jobs. */
 export const ETA_WINDOW = 20;
+/** A gap this long between completed jobs was a Discogs pause, not the queue's pace. */
+const ETA_PAUSE_GAP_MS = 30_000;
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
@@ -96,13 +98,17 @@ function sortColumn(field: SortField) {
 }
 
 /**
- * Time left for `remaining` jobs at the pace of the last ETA_WINDOW completed ones. Null until
- * ETA_MIN_SAMPLES have completed. `doneAt` are completion times in ms, in any order.
+ * Time left for `remaining` jobs at the pace of the last ETA_WINDOW completed ones, leaving out
+ * gaps that were Discogs pauses. Null until ETA_MIN_SAMPLES have completed. `doneAt` are
+ * completion times in ms, in any order.
  */
 function estimateEtaSeconds(doneAt: number[], remaining: number): number | null {
   if (doneAt.length < ETA_MIN_SAMPLES) return null;
   const recent = [...doneAt].sort((a, b) => b - a).slice(0, ETA_WINDOW);
-  const spacingMs = (recent[0]! - recent[recent.length - 1]!) / (recent.length - 1);
+  const gaps = recent.slice(1).map((at, i) => recent[i]! - at);
+  const paced = gaps.filter((gap) => gap < ETA_PAUSE_GAP_MS);
+  if (paced.length === 0) return null;
+  const spacingMs = paced.reduce((sum, gap) => sum + gap, 0) / paced.length;
   return Math.round((spacingMs * remaining) / 1000);
 }
 
@@ -196,7 +202,10 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     const running = seller.lastIndexStatus === "running";
     const phase: IndexingPhase = !running ? "done" : seller.scanCompletedAt ? "enriching" : "scanning";
     const remaining = counts.pending + counts.processing;
-    const etaSeconds = phase === "enriching" ? estimateEtaSeconds(doneAt, remaining) : null;
+    const pause = running ? deps.queue.getPause() : null;
+    const pauseSeconds = pause ? Math.max(0, (pause.retryAt.getTime() - Date.now()) / 1000) : 0;
+    const paceEtaSeconds = phase === "enriching" ? estimateEtaSeconds(doneAt, remaining) : null;
+    const etaSeconds = paceEtaSeconds === null ? null : Math.round(paceEtaSeconds + pauseSeconds);
 
     const dto: SellerStatusDto = {
       username: seller.username,
@@ -215,8 +224,8 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
           ? null
           : { pagesFetched: seller.scanPagesFetched, pagesTotal: seller.scanPagesTotal },
       etaSeconds,
-      retryingAt: null,
-      backoffMs: null,
+      retryingAt: pause?.retryAt.toISOString() ?? null,
+      backoffMs: pause?.backoffMs ?? null,
       coverage:
         seller.inventoryTotal === null
           ? null
