@@ -3,7 +3,7 @@ import type { Db } from "../db/client";
 import { discogsQueueJobs, type QueueJobPayloadMap, type QueueJobType } from "../db/schema";
 import { logger, highlightId } from "../util/logger";
 
-export const PACING_MS = Math.ceil(60_000 / 59);
+export const PACING_MS = 1300;
 export const MAX_ATTEMPTS = 3;
 /** Priority for work a user is actively waiting on (vs. 0 for background indexing). */
 export const INLINE_PRIORITY = 10;

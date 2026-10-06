@@ -12,6 +12,23 @@ const USER_AGENT = "discogs-fade-backend/0.1 +https://github.com/discogs-fade";
 
 export class DiscogsNotFoundError extends Error {}
 
+export const DEFAULT_RATE_LIMIT_PAUSE_MS = 60_000;
+
+/** Discogs answered 429; `retryAfterMs` is how long to stay off the API entirely. */
+export class DiscogsRateLimitError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterMs: number,
+  ) {
+    super(message);
+  }
+}
+
+function retryAfterMs(res: Response): number {
+  const seconds = Number(res.headers.get("Retry-After"));
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RATE_LIMIT_PAUSE_MS;
+}
+
 async function discogsGet<T>(path: string): Promise<T> {
   const headers: Record<string, string> = { "User-Agent": USER_AGENT };
   if (process.env.DISCOGS_TOKEN) {
@@ -25,6 +42,12 @@ async function discogsGet<T>(path: string): Promise<T> {
 
   if (res.status === 404) {
     throw new DiscogsNotFoundError(`Discogs resource not found: ${path}`);
+  }
+  if (res.status === 429) {
+    throw new DiscogsRateLimitError(
+      `Discogs API error 429 for ${path}: ${await res.text()}`,
+      retryAfterMs(res),
+    );
   }
   if (!res.ok) {
     throw new Error(`Discogs API error ${res.status} for ${path}: ${await res.text()}`);
