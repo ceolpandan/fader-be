@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import fs from "node:fs";
 import path from "node:path";
@@ -48,50 +48,13 @@ describe("inventory_page handler", () => {
     }
   });
 
-  it("upserts seller_inventory and enqueues release_detail for a new, not-yet-known release, on a single-page (last) inventory", async () => {
-    const page: DiscogsInventoryPage = {
-      pagination: { page: 1, pages: 1, per_page: 100, items: 1, urls: {} },
-      listings: [listing(732194)],
-    };
-    const getInventory = vi.fn(async () => page);
-
-    const handler = createInventoryPageHandler({ db, enqueue, getInventory });
-
-    await handler(
-      { username: "some-seller", page: 1, runStartedAt: "2026-01-01T00:00:00.000Z" },
-      { runId: "run-1", jobId: 1 },
-    );
-
-    expect(getInventory).toHaveBeenCalledWith("some-seller", 1);
-
-    const [row] = db
-      .select()
-      .from(sellerInventory)
-      .where(
-        and(eq(sellerInventory.sellerUsername, "some-seller"), eq(sellerInventory.releaseId, 732194)),
-      )
-      .all();
-    expect(row).toEqual({
-      sellerUsername: "some-seller",
-      releaseId: 732194,
-      status: "active",
-      firstSeenAt: new Date("2026-01-01T00:00:00.000Z"),
-      lastSeenAt: new Date("2026-01-01T00:00:00.000Z"),
-      soldAt: null,
-    });
-
-    expect(enqueue).toHaveBeenCalledWith({
-      runId: "run-1",
-      type: "release_detail",
-      payload: { releaseId: 732194 },
-    });
-    expect(enqueue).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not enqueue release_detail for a release id already present in releases", async () => {
-    db.insert(releases)
+  const RUN_STARTED = "2026-01-01T00:00:00.000Z";
+  const ctx = { runId: "run-1", jobId: 1 };
+  const knownRelease = (id: number) =>
+    db
+      .insert(releases)
       .values({
-        id: 732194,
+        id,
         title: "Stockholm",
         year: 1998,
         country: "Sweden",
@@ -107,61 +70,107 @@ describe("inventory_page handler", () => {
         artists: [],
       })
       .run();
-
-    const page: DiscogsInventoryPage = {
-      pagination: { page: 1, pages: 1, per_page: 100, items: 1, urls: {} },
-      listings: [listing(732194)],
-    };
-    const getInventory = vi.fn(async () => page);
-    const handler = createInventoryPageHandler({ db, enqueue, getInventory });
-
-    await handler(
-      { username: "some-seller", page: 1, runStartedAt: "2026-01-01T00:00:00.000Z" },
-      { runId: "run-1", jobId: 1 },
-    );
-
-    expect(enqueue).not.toHaveBeenCalled();
-
-    const [row] = db
-      .select()
-      .from(sellerInventory)
-      .where(
-        and(eq(sellerInventory.sellerUsername, "some-seller"), eq(sellerInventory.releaseId, 732194)),
-      )
-      .all();
-    expect(row!.status).toBe("active");
+  const sellerRow = () => db.select().from(sellers).where(eq(sellers.username, "some-seller")).all()[0]!;
+  const inventoryPage = (
+    page: number,
+    pages: number,
+    releaseIds: number[],
+    items = pages * 100,
+  ): DiscogsInventoryPage => ({
+    pagination: {
+      page,
+      pages,
+      per_page: 100,
+      items,
+      urls: page < pages ? { next: `https://api.discogs.com/users/some-seller/inventory?page=${page + 1}` } : {},
+    },
+    listings: releaseIds.map(listing),
   });
 
-  it("chains to the next page when the response has a next link, without running the sold-diff pass", async () => {
-    const page: DiscogsInventoryPage = {
-      pagination: {
-        page: 1,
-        pages: 2,
-        per_page: 100,
-        items: 2,
-        urls: { next: "https://api.discogs.com/users/some-seller/inventory?page=2" },
-      },
-      listings: [listing(732194)],
-    };
-    const getInventory = vi.fn(async () => page);
+  beforeEach(() => {
+    db.insert(sellers)
+      .values({ username: "some-seller", lastIndexStatus: "running", currentRunId: "run-1" })
+      .run();
+  });
+
+  it("upserts seller_inventory but enqueues no release_detail while more pages remain", async () => {
+    const getInventory = vi.fn(async () => inventoryPage(1, 2, [732194]));
     const handler = createInventoryPageHandler({ db, enqueue, getInventory });
 
-    await handler(
-      { username: "some-seller", page: 1, runStartedAt: "2026-01-01T00:00:00.000Z" },
-      { runId: "run-1", jobId: 1 },
-    );
+    await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
 
+    expect(getInventory).toHaveBeenCalledWith("some-seller", 1);
+    const [row] = db.select().from(sellerInventory).where(eq(sellerInventory.releaseId, 732194)).all();
+    expect(row).toEqual({
+      sellerUsername: "some-seller",
+      releaseId: 732194,
+      status: "active",
+      firstSeenAt: new Date(RUN_STARTED),
+      lastSeenAt: new Date(RUN_STARTED),
+      soldAt: null,
+    });
+    expect(enqueue).toHaveBeenCalledTimes(1);
     expect(enqueue).toHaveBeenCalledWith({
       runId: "run-1",
       type: "inventory_page",
-      payload: { username: "some-seller", page: 2, runStartedAt: "2026-01-01T00:00:00.000Z" },
+      payload: { username: "some-seller", page: 2, runStartedAt: RUN_STARTED },
     });
-    // one release_detail (new release) + one chained inventory_page, no sold-diff side effects to verify here
-    expect(enqueue).toHaveBeenCalledTimes(2);
+    expect(sellerRow().scanCompletedAt).toBeNull();
   });
 
-  it("marks a previously-active listing as sold if it's absent from this run's inventory (last page)", async () => {
-    // simulate a listing seen by a previous run, before this run started
+  it("records the inventory total and the pages to scan from page 1, and the page reached", async () => {
+    const handler = createInventoryPageHandler({
+      db,
+      enqueue,
+      getInventory: async () => inventoryPage(1, 423, [1], 42_223),
+    });
+
+    await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+
+    expect(sellerRow()).toMatchObject({
+      inventoryTotal: 42_223,
+      scanPagesTotal: 100,
+      scanPagesFetched: 1,
+    });
+  });
+
+  it("on the last page, enqueues release_detail for every new release seen in the run and marks the scan complete", async () => {
+    knownRelease(2);
+    const handler = createInventoryPageHandler({
+      db,
+      enqueue,
+      getInventory: async (_u, page) => (page === 1 ? inventoryPage(1, 2, [1, 2]) : inventoryPage(2, 2, [3])),
+    });
+
+    await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+    enqueue.mockClear();
+    await handler({ username: "some-seller", page: 2, runStartedAt: RUN_STARTED }, ctx);
+
+    const queued = enqueue.mock.calls.map(([job]) => job);
+    expect(queued).toEqual([
+      { runId: "run-1", type: "release_detail", payload: { releaseId: 1 } },
+      { runId: "run-1", type: "release_detail", payload: { releaseId: 3 } },
+    ]);
+    expect(sellerRow().scanCompletedAt).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+  });
+
+  it("does not enqueue release_detail for releases already stored, but still links them to the seller", async () => {
+    knownRelease(732194);
+    const handler = createInventoryPageHandler({
+      db,
+      enqueue,
+      getInventory: async () => inventoryPage(1, 1, [732194]),
+    });
+
+    await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+
+    expect(enqueue).not.toHaveBeenCalled();
+    const [row] = db.select().from(sellerInventory).where(eq(sellerInventory.releaseId, 732194)).all();
+    expect(row!.status).toBe("active");
+    expect(sellerRow().scanCompletedAt).not.toBeNull();
+  });
+
+  it("ignores listings from earlier runs that this run did not see", async () => {
     db.insert(sellerInventory)
       .values({
         sellerUsername: "some-seller",
@@ -172,65 +181,31 @@ describe("inventory_page handler", () => {
         soldAt: null,
       })
       .run();
+    const handler = createInventoryPageHandler({
+      db,
+      enqueue,
+      getInventory: async () => inventoryPage(1, 1, [732194]),
+    });
 
-    // this run's inventory no longer contains release 999
-    const page: DiscogsInventoryPage = {
-      pagination: { page: 1, pages: 1, per_page: 100, items: 1, urls: {} },
-      listings: [listing(732194)],
-    };
-    const getInventory = vi.fn(async () => page);
-    const handler = createInventoryPageHandler({ db, enqueue, getInventory });
+    await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
 
-    await handler(
-      { username: "some-seller", page: 1, runStartedAt: "2026-01-01T00:00:00.000Z" },
-      { runId: "run-1", jobId: 1 },
-    );
-
-    const [soldRow] = db
-      .select()
-      .from(sellerInventory)
-      .where(
-        and(eq(sellerInventory.sellerUsername, "some-seller"), eq(sellerInventory.releaseId, 999)),
-      )
-      .all();
-    expect(soldRow!.status).toBe("sold");
-    expect(soldRow!.soldAt).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue.mock.calls[0]![0].payload).toEqual({ releaseId: 732194 });
+    const [untouched] = db.select().from(sellerInventory).where(eq(sellerInventory.releaseId, 999)).all();
+    expect(untouched).toMatchObject({ status: "active", soldAt: null });
   });
 
-  it("flips a previously-sold listing back to active and clears sold_at if it's relisted", async () => {
-    db.insert(sellerInventory)
-      .values({
-        sellerUsername: "some-seller",
-        releaseId: 732194,
-        status: "sold",
-        firstSeenAt: new Date("2025-11-01T00:00:00.000Z"),
-        lastSeenAt: new Date("2025-11-15T00:00:00.000Z"),
-        soldAt: new Date("2025-12-01T00:00:00.000Z"),
-      })
-      .run();
+  it("stops at the Discogs 100-page cap and finishes the scan instead of requesting page 101", async () => {
+    const handler = createInventoryPageHandler({
+      db,
+      enqueue,
+      getInventory: async (_u, page) => inventoryPage(page, 423, [page], 42_223),
+    });
 
-    const page: DiscogsInventoryPage = {
-      pagination: { page: 1, pages: 1, per_page: 100, items: 1, urls: {} },
-      listings: [listing(732194)],
-    };
-    const getInventory = vi.fn(async () => page);
-    const handler = createInventoryPageHandler({ db, enqueue, getInventory });
+    await handler({ username: "some-seller", page: 100, runStartedAt: RUN_STARTED }, ctx);
 
-    await handler(
-      { username: "some-seller", page: 1, runStartedAt: "2026-01-01T00:00:00.000Z" },
-      { runId: "run-1", jobId: 1 },
-    );
-
-    const [row] = db
-      .select()
-      .from(sellerInventory)
-      .where(
-        and(eq(sellerInventory.sellerUsername, "some-seller"), eq(sellerInventory.releaseId, 732194)),
-      )
-      .all();
-    expect(row!.status).toBe("active");
-    expect(row!.soldAt).toBeNull();
-    expect(row!.firstSeenAt).toEqual(new Date("2025-11-01T00:00:00.000Z"));
+    expect(enqueue.mock.calls.map(([job]) => job.type)).toEqual(["release_detail"]);
+    expect(sellerRow().scanCompletedAt).not.toBeNull();
   });
 
   describe("seller metadata on page 1", () => {
@@ -250,13 +225,6 @@ describe("inventory_page handler", () => {
         { runId: "run-1", jobId: 1 },
       );
     };
-    const sellerRow = () => db.select().from(sellers).where(eq(sellers.username, "some-seller")).all()[0]!;
-
-    beforeEach(() => {
-      db.insert(sellers)
-        .values({ username: "some-seller", lastIndexStatus: "running", currentRunId: "run-1" })
-        .run();
-    });
 
     it("stores rating and ships-from country", async () => {
       await runPage(1, async () => ({

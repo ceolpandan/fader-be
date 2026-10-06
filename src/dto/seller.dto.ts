@@ -16,6 +16,8 @@ export interface SellerSummaryDto {
   lastIndexStatus: SellerIndexStatus;
 }
 
+export type IndexingPhase = "scanning" | "enriching" | "done";
+
 export interface SellerStatusDto {
   username: string;
   lastIndexedAt: string | null;
@@ -28,6 +30,17 @@ export interface SellerStatusDto {
   sellerRating: number | null;
   sellerNumRatings: number | null;
   shipsFromCountry: string | null;
+  /** `scanning` while inventory pages are fetched, `enriching` while releases are, `done` otherwise. */
+  phase: IndexingPhase;
+  /** Inventory scan progress of the current run; null until page 1 is fetched. */
+  scan: { pagesFetched: number; pagesTotal: number } | null;
+  /** Seconds until enrichment finishes; null when unknown or not enriching. */
+  etaSeconds: number | null;
+  /** When the paused Discogs queue retries (ISO); null while the queue is not paused. */
+  retryingAt: string | null;
+  backoffMs: number | null;
+  /** Inventory items we can reach (Discogs caps pagination) out of all the seller lists. */
+  coverage: { reachable: number; total: number } | null;
 }
 
 export interface SellerInventoryItemDto {

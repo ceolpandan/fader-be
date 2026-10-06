@@ -33,6 +33,10 @@ describe("sellers table", () => {
       sellerRating: null,
       sellerNumRatings: null,
       shipsFromCountry: null,
+      inventoryTotal: 42_223,
+      scanPagesTotal: 100,
+      scanPagesFetched: 12,
+      scanCompletedAt: null,
     };
 
     db.insert(sellers).values(row).run();

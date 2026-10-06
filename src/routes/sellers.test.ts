@@ -174,6 +174,128 @@ describe("sellers routes", () => {
       });
     });
 
+    describe("indexing progress", () => {
+      const start = async () => {
+        const started = await authedRequest(app).post("/sellers/some-seller/index").send();
+        return (started.body as { runId: string }).runId;
+      };
+      const seller = (set: Partial<typeof sellers.$inferInsert>) =>
+        db.update(sellers).set(set).where(eq(sellers.username, "some-seller")).run();
+      const insertDoneJobs = (runId: string, count: number, spacingMs: number) => {
+        for (let i = 0; i < count; i++) {
+          const at = new Date(Date.now() - (count - i) * spacingMs);
+          db.insert(discogsQueueJobs)
+            .values({
+              runId,
+              type: "release_detail",
+              payload: { releaseId: i },
+              status: "done",
+              createdAt: at,
+              updatedAt: at,
+            })
+            .run();
+        }
+      };
+      const insertPendingJobs = (runId: string, count: number) => {
+        const now = new Date();
+        for (let i = 0; i < count; i++) {
+          db.insert(discogsQueueJobs)
+            .values({
+              runId,
+              type: "release_detail",
+              payload: { releaseId: 1000 + i },
+              status: "pending",
+              createdAt: now,
+              updatedAt: now,
+            })
+            .run();
+        }
+      };
+
+      it("is scanning, with no scan data or coverage, right after indexing starts", async () => {
+        await start();
+
+        const res = await authedRequest(app).get("/sellers/some-seller");
+        expect(res.body).toMatchObject({
+          phase: "scanning",
+          scan: null,
+          coverage: null,
+          etaSeconds: null,
+          retryingAt: null,
+          backoffMs: null,
+        });
+      });
+
+      it("reports scan progress and coverage while scanning", async () => {
+        await start();
+        seller({ inventoryTotal: 42_223, scanPagesTotal: 100, scanPagesFetched: 12 });
+
+        const res = await authedRequest(app).get("/sellers/some-seller");
+        expect(res.body).toMatchObject({
+          phase: "scanning",
+          scan: { pagesFetched: 12, pagesTotal: 100 },
+          coverage: { reachable: 10_000, total: 42_223 },
+        });
+      });
+
+      it("is enriching once the scan has completed", async () => {
+        await start();
+        seller({ inventoryTotal: 500, scanPagesTotal: 5, scanPagesFetched: 5, scanCompletedAt: new Date() });
+
+        const res = await authedRequest(app).get("/sellers/some-seller");
+        expect(res.body).toMatchObject({ phase: "enriching", coverage: { reachable: 500, total: 500 } });
+      });
+
+      it("has no ETA until enough releases have been enriched", async () => {
+        const runId = await start();
+        seller({ scanCompletedAt: new Date() });
+        insertDoneJobs(runId, 9, 1300);
+        insertPendingJobs(runId, 50);
+
+        const res = await authedRequest(app).get("/sellers/some-seller");
+        expect(res.body.etaSeconds).toBeNull();
+      });
+
+      it("estimates the ETA from the recent completion pace", async () => {
+        const runId = await start();
+        seller({ scanCompletedAt: new Date() });
+        insertDoneJobs(runId, 30, 2000);
+        insertPendingJobs(runId, 100);
+
+        const res = await authedRequest(app).get("/sellers/some-seller");
+        // 100 remaining at one job per 2s
+        expect(res.body.etaSeconds).toBe(200);
+      });
+
+      it("is done and keeps its coverage after the run finishes", async () => {
+        await start();
+        seller({ lastIndexStatus: "success", inventoryTotal: 42_223, scanPagesTotal: 100, scanPagesFetched: 100 });
+
+        const res = await authedRequest(app).get("/sellers/some-seller");
+        expect(res.body).toMatchObject({
+          phase: "done",
+          etaSeconds: null,
+          coverage: { reachable: 10_000, total: 42_223 },
+        });
+      });
+
+      it("clears the previous run's scan state when indexing again", async () => {
+        await start();
+        seller({
+          lastIndexStatus: "success",
+          inventoryTotal: 42_223,
+          scanPagesTotal: 100,
+          scanPagesFetched: 100,
+          scanCompletedAt: new Date(),
+        });
+
+        await start();
+
+        const res = await authedRequest(app).get("/sellers/some-seller");
+        expect(res.body).toMatchObject({ phase: "scanning", scan: null, coverage: null });
+      });
+    });
+
     it("flips to success (currentlyRunning: false) once the whole run settles, end to end", async () => {
       queue.registerHandler("inventory_page", vi.fn(async () => {}));
       queue.registerHandler("release_detail", vi.fn(async () => {}));

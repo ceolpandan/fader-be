@@ -1,4 +1,4 @@
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { releases, sellerInventory, sellers } from "../db/schema";
 import type { InventoryPagePayload } from "../db/schema";
@@ -40,6 +40,46 @@ async function storeSellerMetadata(
     .run();
 }
 
+/** Discogs only serves the first 100 pages (of 100 listings) of another seller's inventory. */
+export const MAX_SCAN_PAGES = 100;
+
+/**
+ * The scan is over: queue a `release_detail` job for every release this run saw that we don't
+ * have yet. Doing this only now means the total to enrich is fixed before enrichment begins.
+ */
+function finishScan(
+  deps: InventoryPageHandlerDeps,
+  username: string,
+  runId: string,
+  runStartedAt: Date,
+): void {
+  const unknown = deps.db
+    .select({ releaseId: sellerInventory.releaseId })
+    .from(sellerInventory)
+    .where(
+      and(
+        eq(sellerInventory.sellerUsername, username),
+        gte(sellerInventory.lastSeenAt, runStartedAt),
+        sql`${sellerInventory.releaseId} NOT IN (SELECT ${releases.id} FROM ${releases})`,
+      ),
+    )
+    .all();
+
+  for (const { releaseId } of unknown) {
+    deps.enqueue({ runId, type: "release_detail", payload: { releaseId } });
+  }
+
+  deps.db
+    .update(sellers)
+    .set({ scanCompletedAt: new Date() })
+    .where(eq(sellers.username, username))
+    .run();
+
+  logger.info(
+    `Finished inventory scan for ${username} (run ${runId}): ${unknown.length} release(s) to enrich`,
+  );
+}
+
 export function createInventoryPageHandler(
   deps: InventoryPageHandlerDeps,
 ): JobHandler<InventoryPagePayload> {
@@ -50,16 +90,22 @@ export function createInventoryPageHandler(
 
     if (page === 1) {
       await storeSellerMetadata(deps, username, inventoryPage);
+      deps.db
+        .update(sellers)
+        .set({
+          inventoryTotal: inventoryPage.pagination.items,
+          scanPagesTotal: Math.min(inventoryPage.pagination.pages, MAX_SCAN_PAGES),
+        })
+        .where(eq(sellers.username, username))
+        .run();
     }
 
     for (const listing of inventoryPage.listings) {
-      const releaseId = listing.release.id;
-
       deps.db
         .insert(sellerInventory)
         .values({
           sellerUsername: username,
-          releaseId,
+          releaseId: listing.release.id,
           status: "active",
           firstSeenAt: now,
           lastSeenAt: now,
@@ -70,24 +116,15 @@ export function createInventoryPageHandler(
           set: { status: "active", lastSeenAt: now, soldAt: null },
         })
         .run();
-
-      const [existingRelease] = deps.db
-        .select({ id: releases.id })
-        .from(releases)
-        .where(eq(releases.id, releaseId))
-        .all();
-
-      if (!existingRelease) {
-        deps.enqueue({
-          runId: context.runId,
-          type: "release_detail",
-          payload: { releaseId },
-        });
-      }
     }
 
-    const nextUrl = inventoryPage.pagination.urls.next;
-    if (nextUrl) {
+    deps.db
+      .update(sellers)
+      .set({ scanPagesFetched: page })
+      .where(eq(sellers.username, username))
+      .run();
+
+    if (inventoryPage.pagination.urls.next && page < MAX_SCAN_PAGES) {
       deps.enqueue({
         runId: context.runId,
         type: "inventory_page",
@@ -96,19 +133,6 @@ export function createInventoryPageHandler(
       return;
     }
 
-    const runStart = new Date(runStartedAt);
-    deps.db
-      .update(sellerInventory)
-      .set({ status: "sold", soldAt: now })
-      .where(
-        and(
-          eq(sellerInventory.sellerUsername, username),
-          eq(sellerInventory.status, "active"),
-          lt(sellerInventory.lastSeenAt, runStart),
-        ),
-      )
-      .run();
-
-    logger.info(`Finished inventory scan for ${username} (run ${context.runId})`);
+    finishScan(deps, username, context.runId, new Date(runStartedAt));
   };
 }

@@ -52,6 +52,13 @@ export const sellers = sqliteTable("sellers", {
   sellerRating: real("seller_rating"),
   sellerNumRatings: integer("seller_num_ratings"),
   shipsFromCountry: text("ships_from_country"),
+  /** Discogs' `pagination.items` for the seller's inventory, known once page 1 is fetched. */
+  inventoryTotal: integer("inventory_total"),
+  /** Inventory pages the current run will scan (capped at the Discogs 100-page limit). */
+  scanPagesTotal: integer("scan_pages_total"),
+  scanPagesFetched: integer("scan_pages_fetched").notNull().default(0),
+  /** Set when the scan phase ends and the release_detail jobs are queued. */
+  scanCompletedAt: integer("scan_completed_at", { mode: "timestamp" }),
 });
 
 export type SellerInventoryStatus = "active" | "sold";

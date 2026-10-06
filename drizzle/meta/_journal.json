@@ -64,6 +64,13 @@
       "when": 1790888828708,
       "tag": "0008_flippant_zombie",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791313237194,
+      "tag": "0009_seller_scan_progress",
+      "breakpoints": true
     }
   ]
 }
