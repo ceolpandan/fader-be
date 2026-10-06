@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs, sellers } from "../db/schema";
-import { checkRunCompletion, markRunAborted } from "./run-completion";
+import { checkRunCompletion, failOrphanedRuns, markRunAborted } from "./run-completion";
 
 describe("checkRunCompletion", () => {
   let dbPath: string;
@@ -95,5 +95,49 @@ describe("checkRunCompletion", () => {
 
     const [row] = db.select().from(sellers).where(eq(sellers.username, "some-seller")).all();
     expect(row!.lastIndexStatus).toBe("error");
+  });
+
+  describe("failOrphanedRuns", () => {
+    function seedRunning(username: string, runId: string | null) {
+      db.insert(sellers)
+        .values({ username, lastIndexStatus: "running", currentRunId: runId, lastIndexedAt: null })
+        .run();
+    }
+
+    function statusOf(username: string) {
+      return db.select().from(sellers).where(eq(sellers.username, username)).all()[0]!.lastIndexStatus;
+    }
+
+    it("flips a running seller with no job for its run to error", () => {
+      seedRunning("stuck", "run-1");
+
+      expect(failOrphanedRuns(db)).toBe(1);
+      expect(statusOf("stuck")).toBe("error");
+    });
+
+    it("flips a running seller that has no run id", () => {
+      seedRunning("stuck", null);
+
+      expect(failOrphanedRuns(db)).toBe(1);
+      expect(statusOf("stuck")).toBe("error");
+    });
+
+    it("leaves a running seller alone while a job for its run is pending or processing", () => {
+      seedRunning("busy", "run-1");
+      seedRunning("busy-too", "run-2");
+      seedJob("run-1", "release_detail", "pending", { releaseId: 1 });
+      seedJob("run-2", "release_detail", "processing", { releaseId: 2 });
+
+      expect(failOrphanedRuns(db)).toBe(0);
+      expect(statusOf("busy")).toBe("running");
+      expect(statusOf("busy-too")).toBe("running");
+    });
+
+    it("leaves sellers that are not running alone", () => {
+      seedSeller("done", "success");
+
+      expect(failOrphanedRuns(db)).toBe(0);
+      expect(statusOf("done")).toBe("success");
+    });
   });
 });

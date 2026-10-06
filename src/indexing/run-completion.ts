@@ -11,6 +11,34 @@ export function markRunAborted(db: Db, runId: string): void {
 }
 
 /**
+ * Startup safety net: a `running` seller with no pending/processing job for its current run
+ * has nothing left to settle it (e.g. a crash mid-start), so it would answer 409 forever.
+ * Flip it to `error` so it can be reindexed. Call after the queue has recovered stuck jobs.
+ */
+export function failOrphanedRuns(db: Db): number {
+  const running = db.select().from(sellers).where(eq(sellers.lastIndexStatus, "running")).all();
+  let failed = 0;
+  for (const seller of running) {
+    const unfinished = seller.currentRunId
+      ? db
+          .select({ id: discogsQueueJobs.id })
+          .from(discogsQueueJobs)
+          .where(
+            and(
+              eq(discogsQueueJobs.runId, seller.currentRunId),
+              inArray(discogsQueueJobs.status, ["pending", "processing"]),
+            ),
+          )
+          .all()
+      : [];
+    if (unfinished.length > 0) continue;
+    db.update(sellers).set({ lastIndexStatus: "error" }).where(eq(sellers.username, seller.username)).run();
+    failed++;
+  }
+  return failed;
+}
+
+/**
  * Called after any job settles (done/failed). If no job for `runId` is left
  * pending/processing, the run is complete: flip the owning seller's status to
  * `success` (a no-op if it's no longer `running` — e.g. a stale/duplicate check).

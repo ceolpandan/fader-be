@@ -90,6 +90,17 @@ describe("sellers routes", () => {
       });
     });
 
+    it("does not leave the seller running when enqueueing the first job fails", async () => {
+      vi.spyOn(queue, "enqueue").mockImplementation(() => {
+        throw new Error("disk full");
+      });
+
+      const res = await authedRequest(app).post("/sellers/some-seller/index").send();
+
+      expect(res.status).toBe(500);
+      expect(db.select().from(sellers).where(eq(sellers.username, "some-seller")).all()).toEqual([]);
+    });
+
     it("returns 409 if indexing is already running for that username", async () => {
       const first = await authedRequest(app).post("/sellers/some-seller/index").send();
       expect(first.status).toBe(202);
