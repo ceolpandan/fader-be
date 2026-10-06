@@ -17,8 +17,12 @@ The Discogs grouping of all versions of the same work. A release belongs to at m
 _Avoid_: Album, group
 
 **Inventory item**:
-A release a particular seller has on sale. It is active while the seller lists it and sold once it disappears from their listings.
-_Avoid_: Listing, stock, product
+A release a particular seller had on sale when we last scanned them, backed by one or more listings.
+_Avoid_: Stock, product
+
+**Listing**:
+One copy of a release that a seller has for sale, with its own media condition and price. A seller can have several listings of the same release.
+_Avoid_: Copy, offer
 
 **Enriched release**:
 A release whose details we have fetched from Discogs and stored. Only enriched releases appear when browsing a seller's inventory.
@@ -38,6 +42,14 @@ _Avoid_: Audio link, media link
 Fetching a seller's whole inventory and enriching each release we don't have yet. Running it again for the same seller is a reindex.
 _Avoid_: Crawl, scrape, sync
 
+**Run**:
+One execution of indexing for one seller, from start to finish. A reindex is a new run for a seller we have indexed before. A run can end successfully even when some releases failed to enrich.
+_Avoid_: Job, task
+
+**Enrich**:
+Fetch a release's details from Discogs and store them, making it an enriched release. A run scans first, then enriches.
+_Avoid_: Sync, hydrate
+
 **Refresh**:
 Re-fetching one release from live Discogs and overwriting everything we store for it, regardless of when it was indexed. Not the same as a reindex, which covers a whole seller and skips releases already enriched.
 _Avoid_: Reindex (for a single release), resync, update
@@ -51,7 +63,7 @@ One sorted walk over a seller's inventory within a scan. Discogs serves only the
 _Avoid_: Round, sweep
 
 **Coverage**:
-How many of the inventory items a seller lists a scan reached. It counts listings (copies for sale), not releases, because Discogs' total does.
+How many of a seller's listings a scan reached. It counts listings, not releases, because Discogs' total does.
 _Avoid_: Completeness, progress
 
 ## Discogs access
@@ -71,5 +83,15 @@ _Avoid_: Priority job, foreground job
 ## Hiding
 
 **Fade**:
-Hiding a release the collector isn't interested in, together with its master and every other version under that master. The extension dims faded releases on Discogs pages.
+Hiding a release a collector isn't interested in, together with its master and every other version under that master. Fades belong to the collector who made them. The extension dims faded releases on Discogs pages.
 _Avoid_: Block, hide, ignore
+
+## Who uses it
+
+**Collector**:
+A person using Fader to browse sellers' inventories. Each collector has their own fades.
+_Avoid_: User, customer
+
+**Extension**:
+The Chrome extension (`fader-fe`) that dims a collector's faded releases while they browse Discogs.
+_Avoid_: Plugin, add-on
