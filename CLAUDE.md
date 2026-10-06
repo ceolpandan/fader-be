@@ -27,6 +27,6 @@ For a feature spanning both repos: backend first (DTO + `openapi.yaml` + tests),
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`. Use the `CONTEXT.md` terms in names, commits and issues.
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`. Use the `GLOSSARY.md` terms in names, commits and issues.
 
-When a change adds or renames a domain concept, or makes a decision someone would otherwise have to dig out of an issue comment, update `CONTEXT.md` or add an ADR under `docs/adr/` in the same change. Issues are the working record; `CONTEXT.md` and the ADRs are the current truth.
+When a change adds or renames a domain concept, or makes a decision someone would otherwise have to dig out of an issue comment, update `GLOSSARY.md` or add an ADR under `docs/adr/` in the same change. Issues are the working record; `GLOSSARY.md` and the ADRs are the current truth.
