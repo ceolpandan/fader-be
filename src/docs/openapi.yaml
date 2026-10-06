@@ -424,6 +424,12 @@ components:
           sellerRating,
           sellerNumRatings,
           shipsFromCountry,
+          phase,
+          scan,
+          etaSeconds,
+          retryingAt,
+          backoffMs,
+          coverage,
         ]
       properties:
         username: { type: string }
@@ -443,6 +449,35 @@ components:
           description: Seller rating as a percentage, e.g. 96.4.
         sellerNumRatings: { type: integer, nullable: true }
         shipsFromCountry: { type: string, nullable: true }
+        phase:
+          type: string
+          enum: [scanning, enriching, done]
+          description: scanning while inventory pages are fetched, enriching while releases are, done otherwise.
+        scan:
+          type: object
+          nullable: true
+          description: Inventory scan progress of the current run; null until page 1 is fetched.
+          required: [pagesFetched, pagesTotal]
+          properties:
+            pagesFetched: { type: integer }
+            pagesTotal: { type: integer }
+        etaSeconds:
+          type: integer
+          nullable: true
+          description: Seconds until enrichment finishes; null when unknown (too few releases enriched yet) or not enriching.
+        retryingAt:
+          type: string
+          nullable: true
+          description: When the paused Discogs queue retries (ISO); null while the queue is not paused.
+        backoffMs: { type: integer, nullable: true }
+        coverage:
+          type: object
+          nullable: true
+          description: Inventory items we can reach out of all the seller lists. Discogs only serves the first 100 pages of an inventory, so reachable is lower than total for large sellers.
+          required: [reachable, total]
+          properties:
+            reachable: { type: integer }
+            total: { type: integer }
 
     SellerInventoryItemDto:
       type: object

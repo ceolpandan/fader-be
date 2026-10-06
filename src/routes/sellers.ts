@@ -9,10 +9,18 @@ import type {
   IndexStartedDto,
   SellerInventoryFacetsDto,
   SellerInventoryPageDto,
+  IndexingPhase,
   SellerStatusDto,
   SellerSummaryDto,
 } from "../dto/seller.dto";
+import { MAX_SCAN_PAGES } from "../indexing/inventory-page-handler";
 import type { DiscogsQueue } from "../queue/discogs-queue";
+
+const MAX_REACHABLE_ITEMS = MAX_SCAN_PAGES * 100;
+/** Completed release_detail jobs needed before an ETA is worth showing. */
+export const ETA_MIN_SAMPLES = 10;
+/** The ETA rate is taken from this many most recently completed jobs. */
+export const ETA_WINDOW = 20;
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
@@ -87,6 +95,17 @@ function sortColumn(field: SortField) {
   }
 }
 
+/**
+ * Time left for `remaining` jobs at the pace of the last ETA_WINDOW completed ones. Null until
+ * ETA_MIN_SAMPLES have completed. `doneAt` are completion times in ms, in any order.
+ */
+function estimateEtaSeconds(doneAt: number[], remaining: number): number | null {
+  if (doneAt.length < ETA_MIN_SAMPLES) return null;
+  const recent = [...doneAt].sort((a, b) => b - a).slice(0, ETA_WINDOW);
+  const spacingMs = (recent[0]! - recent[recent.length - 1]!) / (recent.length - 1);
+  return Math.round((spacingMs * remaining) / 1000);
+}
+
 export function createSellersRouter(deps: SellersRouterDeps): Router {
   const router = Router();
 
@@ -125,7 +144,14 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .values({ username, lastIndexStatus: "running", currentRunId: runId })
       .onConflictDoUpdate({
         target: sellers.username,
-        set: { lastIndexStatus: "running", currentRunId: runId },
+        set: {
+          lastIndexStatus: "running",
+          currentRunId: runId,
+          inventoryTotal: null,
+          scanPagesTotal: null,
+          scanPagesFetched: 0,
+          scanCompletedAt: null,
+        },
       })
       .run();
 
@@ -149,9 +175,10 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     }
 
     const counts = { pending: 0, processing: 0, done: 0, failed: 0 };
+    const doneAt: number[] = [];
     if (seller.currentRunId) {
       const jobs = deps.db
-        .select({ status: discogsQueueJobs.status })
+        .select({ status: discogsQueueJobs.status, updatedAt: discogsQueueJobs.updatedAt })
         .from(discogsQueueJobs)
         .where(
           and(
@@ -160,8 +187,16 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
           ),
         )
         .all();
-      for (const job of jobs) counts[job.status] += 1;
+      for (const job of jobs) {
+        counts[job.status] += 1;
+        if (job.status === "done") doneAt.push(job.updatedAt.getTime());
+      }
     }
+
+    const running = seller.lastIndexStatus === "running";
+    const phase: IndexingPhase = !running ? "done" : seller.scanCompletedAt ? "enriching" : "scanning";
+    const remaining = counts.pending + counts.processing;
+    const etaSeconds = phase === "enriching" ? estimateEtaSeconds(doneAt, remaining) : null;
 
     const dto: SellerStatusDto = {
       username: seller.username,
@@ -174,6 +209,21 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       sellerRating: seller.sellerRating,
       sellerNumRatings: seller.sellerNumRatings,
       shipsFromCountry: seller.shipsFromCountry,
+      phase,
+      scan:
+        seller.scanPagesTotal === null
+          ? null
+          : { pagesFetched: seller.scanPagesFetched, pagesTotal: seller.scanPagesTotal },
+      etaSeconds,
+      retryingAt: null,
+      backoffMs: null,
+      coverage:
+        seller.inventoryTotal === null
+          ? null
+          : {
+              reachable: Math.min(seller.inventoryTotal, MAX_REACHABLE_ITEMS),
+              total: seller.inventoryTotal,
+            },
     };
     res.json(dto);
   });
