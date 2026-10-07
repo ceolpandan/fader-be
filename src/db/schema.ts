@@ -76,10 +76,13 @@ export const sellerInventory = sqliteTable(
   (table) => [primaryKey({ columns: [table.sellerUsername, table.releaseId] })],
 );
 
-export type ScanSort = "artist";
+export type ScanSort = "artist" | "listed" | "label" | "catno" | "item" | "price" | "audio";
 export type ScanOrder = "asc" | "desc";
-/** `capped`: Discogs refused to paginate any further, so the pass ended cleanly. */
-export type ScanPassStatus = "running" | "done" | "capped";
+/**
+ * `capped`: Discogs refused to paginate any further, so the pass ended cleanly.
+ * `failed`: a page kept failing, so the pass was abandoned and the scan moved on.
+ */
+export type ScanPassStatus = "running" | "done" | "capped" | "failed";
 
 /** One sorted walk over a seller's inventory within an indexing run, kept for diagnosing coverage. */
 export const scanPasses = sqliteTable(
@@ -112,7 +115,7 @@ export interface InventoryPagePayload {
   /** ISO timestamp of when this indexing run started (page 1's enqueue time), carried
    * forward unchanged through every chained page — used as the sold-diff cutoff. */
   runStartedAt: string;
-  /** Sort of the pass this page belongs to; jobs queued before two-pass scanning omit it. */
+  /** Sort of the pass this page belongs to; jobs queued before multi-pass scanning omit it. */
   sort?: ScanSort;
   order?: ScanOrder;
 }

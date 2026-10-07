@@ -251,7 +251,7 @@ describe("sellers routes", () => {
       });
 
       describe("scan passes", () => {
-        const pass = (runId: string, order: "asc" | "desc", itemsSeen: number, status: "running" | "done" | "capped") =>
+        const pass = (runId: string, order: "asc" | "desc", itemsSeen: number, status: "running" | "done" | "capped" | "failed") =>
           db
             .insert(scanPasses)
             .values({
@@ -293,36 +293,54 @@ describe("sellers routes", () => {
           ]);
         });
 
-        it("estimates coverage from the planned passes while scanning", async () => {
+        const seen = (count: number, lastSeenAt: Date) => {
+          for (let i = 0; i < count; i += 1) {
+            db.insert(sellerInventory)
+              .values({
+                sellerUsername: "some-seller",
+                releaseId: lastSeenAt.getFullYear() * 1000 + i,
+                status: "active",
+                firstSeenAt: lastSeenAt,
+                lastSeenAt,
+                soldAt: null,
+              })
+              .run();
+          }
+        };
+
+        it("counts the distinct items seen since the run's first pass began, a count that grows while scanning", async () => {
           const runId = await start();
-          seller({ inventoryTotal: 42_223, scanPagesTotal: 200, scanPagesFetched: 12 });
+          seller({ inventoryTotal: 42_223, scanPagesTotal: 1400, scanPagesFetched: 12 });
           pass(runId, "asc", 1_200, "running");
+          seen(120, new Date("2026-01-01T00:01:00.000Z"));
+          seen(30, new Date("2025-12-01T00:00:00.000Z"));
 
           const res = await authedRequest(app).get("/sellers/some-seller");
 
-          expect(res.body.coverage).toEqual({ reachable: 20_000, total: 42_223 });
+          expect(res.body.coverage).toEqual({ reachable: 120, total: 42_223 });
         });
 
-        it("reports the items the passes actually saw once the scan has completed", async () => {
+        it("counts an item both passes saw once", async () => {
           const runId = await start();
           seller({ inventoryTotal: 42_223, scanCompletedAt: new Date() });
           pass(runId, "asc", 10_000, "done");
           pass(runId, "desc", 4_000, "capped");
+          seen(140, new Date("2026-01-01T00:01:00.000Z"));
 
           const res = await authedRequest(app).get("/sellers/some-seller");
 
-          expect(res.body.coverage).toEqual({ reachable: 14_000, total: 42_223 });
+          expect(res.body.coverage).toEqual({ reachable: 140, total: 42_223 });
         });
 
-        it("never reports more than the seller lists", async () => {
+        it("reports the whole inventory once a single pass returned every listing", async () => {
           const runId = await start();
-          seller({ inventoryTotal: 10_050, scanCompletedAt: new Date() });
-          pass(runId, "asc", 10_000, "done");
-          pass(runId, "desc", 100, "done");
+          seller({ inventoryTotal: 50, scanCompletedAt: new Date() });
+          pass(runId, "asc", 50, "done");
+          seen(40, new Date("2026-01-01T00:01:00.000Z"));
 
           const res = await authedRequest(app).get("/sellers/some-seller");
 
-          expect(res.body.coverage).toEqual({ reachable: 10_050, total: 10_050 });
+          expect(res.body.coverage).toEqual({ reachable: 50, total: 50 });
         });
 
         it("has no passes before the scan starts", async () => {
@@ -597,8 +615,20 @@ describe("sellers routes", () => {
             endedAt: new Date(),
           })
           .run();
+        for (const releaseId of [1, 2, 3]) {
+          db.insert(sellerInventory)
+            .values({
+              sellerUsername: "seller-a",
+              releaseId,
+              status: "active",
+              firstSeenAt: new Date(),
+              lastSeenAt: new Date(),
+              soldAt: null,
+            })
+            .run();
+        }
 
-        expect((await listed("seller-a")).coverage).toEqual({ reachable: 10_000, total: 14_320 });
+        expect((await listed("seller-a")).coverage).toEqual({ reachable: 3, total: 14_320 });
       });
     });
   });

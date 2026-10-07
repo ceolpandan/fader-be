@@ -8,6 +8,8 @@ export const PACING_MS = 1300;
 export const MAX_ATTEMPTS = 3;
 /** Priority for work a user is actively waiting on (vs. 0 for background indexing). */
 export const INLINE_PRIORITY = 10;
+/** Scan pages run ahead of enrichment, so a scan finishes in minutes while releases trickle in. */
+export const SCAN_PRIORITY = 5;
 export const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 export const BASE_BACKOFF_MS = 2000;
 /** The first pause after a transient Discogs error; each further failure in a row doubles it. */
@@ -27,6 +29,8 @@ export class QueueUnavailableError extends Error {}
 export interface JobHandlerContext {
   runId: string;
   jobId: number;
+  /** 1 on the first try; the job fails for good once this reaches MAX_ATTEMPTS. */
+  attempt?: number;
 }
 
 export type JobHandler<TPayload = unknown> = (
@@ -219,7 +223,7 @@ export class DiscogsQueue {
     logger.info(`Processing job ${highlightId(job.id)} (${job.type}, run ${job.runId})`);
 
     try {
-      await handler(job.payload, { runId: job.runId, jobId: job.id });
+      await handler(job.payload, { runId: job.runId, jobId: job.id, attempt: job.attempts + 1 });
       this.markDone(job);
     } catch (err) {
       this.handleFailure(job, err);

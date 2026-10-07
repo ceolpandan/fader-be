@@ -14,27 +14,36 @@ import type {
   SellerStatusDto,
   SellerSummaryDto,
 } from "../dto/seller.dto";
+import { isInventoryCovered, observedItems } from "../indexing/coverage";
 import { MAX_REACHABLE_ITEMS } from "../indexing/inventory-page-handler";
-import type { DiscogsQueue } from "../queue/discogs-queue";
+import { SCAN_PRIORITY, type DiscogsQueue } from "../queue/discogs-queue";
 
 /**
- * Inventory items the scan reaches. Once it has finished that is what its passes actually saw;
- * until then (or for a run that predates scan passes) it is what the planned passes can reach.
+ * Inventory items the run has seen so far: distinct items since its first pass began, or all of
+ * them once one pass returned every listing. A run that predates scan passes falls back to what
+ * a single pass can reach.
  */
-function reachableItems(total: number, passes: { itemsSeen: number }[], scanDone: boolean): number {
+function reachableItems(
+  db: Db,
+  seller: typeof sellers.$inferSelect,
+  total: number,
+  passes: { itemsSeen: number; startedAt: Date }[],
+): number {
   if (passes.length === 0) return Math.min(total, MAX_REACHABLE_ITEMS);
-  if (scanDone) return Math.min(total, passes.reduce((sum, pass) => sum + pass.itemsSeen, 0));
-  return Math.min(total, MAX_REACHABLE_ITEMS * (total > MAX_REACHABLE_ITEMS ? 2 : 1));
+  const since = new Date(Math.min(...passes.map((pass) => pass.startedAt.getTime())));
+  const observed = observedItems(db, seller.username, since);
+  return isInventoryCovered(total, observed, passes) ? total : observed;
 }
 
 /** How much of a seller's inventory the scan reached; null until the first page has told us the total. */
 function coverageOf(
+  db: Db,
   seller: typeof sellers.$inferSelect,
-  passes: { itemsSeen: number }[],
+  passes: { itemsSeen: number; startedAt: Date }[],
 ): { reachable: number; total: number } | null {
   if (seller.inventoryTotal === null) return null;
   return {
-    reachable: reachableItems(seller.inventoryTotal, passes, seller.scanCompletedAt !== null),
+    reachable: reachableItems(db, seller, seller.inventoryTotal, passes),
     total: seller.inventoryTotal,
   };
 }
@@ -167,7 +176,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
         lastIndexStatus: row.lastIndexStatus,
         forSaleCount: countForSale(deps.db, row.username),
         fadedCount: countForSale(deps.db, row.username, isFadedFor(uid)),
-        coverage: coverageOf(row, passes),
+        coverage: coverageOf(deps.db, row, passes),
       };
     });
     res.json(dto);
@@ -208,6 +217,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
         runId,
         type: "inventory_page",
         payload: { username, page: 1, runStartedAt },
+        priority: SCAN_PRIORITY,
       });
     });
 
@@ -291,7 +301,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       retryingAt: pause?.retryAt.toISOString() ?? null,
       backoffMs: pause?.backoffMs ?? null,
       scanPasses: scanPassDtos,
-      coverage: coverageOf(seller, passes),
+      coverage: coverageOf(deps.db, seller, passes),
     };
     res.json(dto);
   });

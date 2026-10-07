@@ -55,15 +55,15 @@ Re-fetching one release from live Discogs and overwriting everything we store fo
 _Avoid_: Reindex (for a single release), resync, update
 
 **Scan**:
-The first phase of indexing: walking a seller's inventory pages to record which releases they have. Enriching the releases we don't have yet starts once it ends.
+The first phase of indexing: walking a seller's inventory pages to record which releases they have. Enriching the releases we don't have yet starts as each scan pass ends.
 _Avoid_: Crawl
 
 **Scan pass**:
-One sorted walk over a seller's inventory within a scan. Discogs serves only the first 100 pages (10,000 items) per sort order, so a seller over that gets a second pass in the opposite order. A pass ends **capped** when Discogs refuses to paginate any further.
+One sorted walk over a seller's inventory within a scan. Discogs serves only the first 100 pages (10,000 items) per sort order, so a scan keeps walking further sorts (artist, listed, label, catno, item, price, audio), each ascending then descending, until it has seen every item or run out of passes. A pass ends **capped** when Discogs refuses to paginate any further, and **failed** when a page kept failing.
 _Avoid_: Round, sweep
 
 **Coverage**:
-How many of a seller's listings a scan reached. It counts listings, not releases, because Discogs' total does.
+How many of a seller's inventory items a scan reached: distinct items seen in the run, out of Discogs' listing total. A pass that returned every listing counts as full coverage, since several copies of a release would otherwise never add up to the total.
 _Avoid_: Completeness, progress
 
 ## Discogs access
