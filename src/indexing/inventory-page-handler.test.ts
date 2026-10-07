@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
-import { DiscogsAuthError, DiscogsPaginationCapError } from "../discogs-client";
+import { DiscogsAuthError, DiscogsNotFoundError, DiscogsPaginationCapError } from "../discogs-client";
 import type { DiscogsInventoryPage, DiscogsUserProfile } from "../types/discogs-api";
 import { createInventoryPageHandler, SCAN_PASSES } from "./inventory-page-handler";
 import { SCAN_PRIORITY, type EnqueueInput } from "../queue/discogs-queue";
@@ -423,6 +423,21 @@ describe("inventory_page handler", () => {
         await expect(
           failing()({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, { ...ctx, attempt: 1 }),
         ).rejects.toThrow("boom");
+      });
+
+      it("ends the run as error, without retrying, when the first page is a 404", async () => {
+        const handler = createInventoryPageHandler({
+          db,
+          enqueue,
+          getInventory: async () => {
+            throw new DiscogsNotFoundError("gone");
+          },
+        });
+
+        await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, { ...ctx, attempt: 1 });
+
+        expect(sellerRow().lastIndexStatus).toBe("error");
+        expect(enqueue).not.toHaveBeenCalled();
       });
 
       it("still fails the run when the first pass cannot even start", async () => {

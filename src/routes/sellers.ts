@@ -16,7 +16,14 @@ import type {
 } from "../dto/seller.dto";
 import { isInventoryCovered, observedItems } from "../indexing/coverage";
 import { MAX_REACHABLE_ITEMS } from "../indexing/inventory-page-handler";
-import { SCAN_PRIORITY, type DiscogsQueue } from "../queue/discogs-queue";
+import {
+  NonRetryableError,
+  QueueUnavailableError,
+  QueueWaitTimeoutError,
+  SCAN_PRIORITY,
+  type DiscogsQueue,
+} from "../queue/discogs-queue";
+import { logger } from "../util/logger";
 
 /**
  * Inventory items the run has seen so far: distinct items since its first pass began, or all of
@@ -182,35 +189,23 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     res.json(dto);
   });
 
-  router.post("/:username/index", (req, res) => {
-    const { username } = req.params;
-
-    const [existing] = deps.db.select().from(sellers).where(eq(sellers.username, username)).all();
-    if (existing?.lastIndexStatus === "running") {
-      res.status(409).json({ error: `Indexing is already running for ${username}` });
-      return;
-    }
-
+  /** Run the already-known seller again: one transaction, so a crash can't leave it `running` with no job. */
+  function restartRun(username: string): string {
     const runId = randomUUID();
     const runStartedAt = new Date().toISOString();
 
-    // One transaction (a single connection, so the queue's insert joins it): a crash can't
-    // leave the seller `running` with no job to settle the run.
     deps.db.transaction(() => {
       deps.db
-        .insert(sellers)
-        .values({ username, lastIndexStatus: "running", currentRunId: runId })
-        .onConflictDoUpdate({
-          target: sellers.username,
-          set: {
-            lastIndexStatus: "running",
-            currentRunId: runId,
-            inventoryTotal: null,
-            scanPagesTotal: null,
-            scanPagesFetched: 0,
-            scanCompletedAt: null,
-          },
+        .update(sellers)
+        .set({
+          lastIndexStatus: "running",
+          currentRunId: runId,
+          inventoryTotal: null,
+          scanPagesTotal: null,
+          scanPagesFetched: 0,
+          scanCompletedAt: null,
         })
+        .where(eq(sellers.username, username))
         .run();
 
       deps.queue.enqueue({
@@ -220,8 +215,59 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
         priority: SCAN_PRIORITY,
       });
     });
+    return runId;
+  }
 
-    const dto: IndexStartedDto = { username, runId };
+  router.post("/:username/index", async (req, res) => {
+    const typed = req.params.username.trim();
+    if (!typed) {
+      res.status(400).json({ error: "username must not be empty" });
+      return;
+    }
+
+    // Discogs usernames are case-insensitive, so `FooBar` and `foobar` are one Seller.
+    const [existing] = deps.db
+      .select()
+      .from(sellers)
+      .where(sql`lower(${sellers.username}) = lower(${typed})`)
+      .all();
+
+    if (existing) {
+      if (existing.lastIndexStatus === "running") {
+        res.status(409).json({ error: `Indexing is already running for ${existing.username}` });
+        return;
+      }
+      const dto: IndexStartedDto = { username: existing.username, runId: restartRun(existing.username) };
+      res.status(202).json(dto);
+      return;
+    }
+
+    // Unknown to us: ask Discogs first, so a typo never becomes a Seller. The job creates the
+    // Seller (under Discogs' casing) and starts the run under this id.
+    const runId = randomUUID();
+    try {
+      await deps.queue.enqueueAndWait({ runId, type: "seller_profile", payload: { username: typed } });
+    } catch (err) {
+      if (err instanceof NonRetryableError) {
+        res.status(404).json({ error: `No Discogs user named '${typed}'` });
+      } else if (err instanceof QueueUnavailableError) {
+        res.status(503).json({ error: "Discogs unavailable, retrying" });
+      } else if (err instanceof QueueWaitTimeoutError) {
+        res.status(504).json({ error: "Timed out waiting for Discogs" });
+      } else {
+        logger.error("Failed to validate seller with Discogs", err);
+        res.status(502).json({ error: "Failed to validate seller with Discogs" });
+      }
+      return;
+    }
+
+    const [started] = deps.db.select().from(sellers).where(eq(sellers.currentRunId, runId)).all();
+    if (!started) {
+      // Another request got this Seller running between our lookup and the job.
+      res.status(409).json({ error: `Indexing is already running for ${typed}` });
+      return;
+    }
+    const dto: IndexStartedDto = { username: started.username, runId };
     res.status(202).json(dto);
   });
 

@@ -10,6 +10,7 @@ import type {
 } from "../db/schema";
 import {
   DiscogsAuthError,
+  DiscogsNotFoundError,
   DiscogsPaginationCapError,
   DiscogsTransientError,
 } from "../discogs-client";
@@ -228,6 +229,18 @@ export function createInventoryPageHandler(
       if (error instanceof DiscogsPaginationCapError) {
         logger.warn(`Discogs stopped paginating ${username} (${sort} ${order}) at page ${page}`);
         endPass("capped");
+        return;
+      }
+      if (isFirstPass && page === 1 && error instanceof DiscogsNotFoundError) {
+        // The seller can't be read at all (e.g. the account was deleted): nothing to scan, so the run failed.
+        logger.warn(`Discogs has no inventory for ${username}, ending run ${context.runId} as error`);
+        deps.db.update(sellers).set({ lastIndexStatus: "error" }).where(eq(sellers.username, username)).run();
+        return;
+      }
+      if (isFirstPass && page === 1 && error instanceof DiscogsNotFoundError) {
+        // The seller can't be read at all (e.g. the account was deleted): nothing to scan, so the run failed.
+        logger.warn(`Discogs has no inventory for ${username}, ending run ${context.runId} as error`);
+        deps.db.update(sellers).set({ lastIndexStatus: "error" }).where(eq(sellers.username, username)).run();
         return;
       }
       if (!failsPassOnly(error)) throw error;

@@ -106,7 +106,7 @@ export const scanPasses = sqliteTable(
   (table) => [uniqueIndex("scan_passes_run_sort_order_idx").on(table.runId, table.sort, table.order)],
 );
 
-export type QueueJobType = "inventory_page" | "release_detail";
+export type QueueJobType = "inventory_page" | "release_detail" | "seller_profile";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
 export interface InventoryPagePayload {
@@ -124,9 +124,15 @@ export interface ReleaseDetailPayload {
   releaseId: number;
 }
 
+/** Checks a typed username against Discogs; on success the handler creates the Seller and starts its run. */
+export interface SellerProfilePayload {
+  username: string;
+}
+
 export interface QueueJobPayloadMap {
   inventory_page: InventoryPagePayload;
   release_detail: ReleaseDetailPayload;
+  seller_profile: SellerProfilePayload;
 }
 
 export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
@@ -134,7 +140,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
-    .$type<InventoryPagePayload | ReleaseDetailPayload>()
+    .$type<InventoryPagePayload | ReleaseDetailPayload | SellerProfilePayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
   priority: integer("priority").notNull().default(0),

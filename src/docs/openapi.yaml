@@ -219,8 +219,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/IndexStartedDto"
+        "400":
+          description: The username is empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Discogs has no user with this name; nothing was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
         "409":
           description: Indexing is already running for this seller
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Discogs failed while checking the user; nothing was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is unavailable and being retried; nothing was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "504":
+          description: Timed out waiting for Discogs to check the user
           content:
             application/json:
               schema:
