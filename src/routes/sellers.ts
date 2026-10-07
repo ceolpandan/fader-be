@@ -27,6 +27,34 @@ function reachableItems(total: number, passes: { itemsSeen: number }[], scanDone
   return Math.min(total, MAX_REACHABLE_ITEMS * (total > MAX_REACHABLE_ITEMS ? 2 : 1));
 }
 
+/** How much of a seller's inventory the scan reached; null until the first page has told us the total. */
+function coverageOf(
+  seller: typeof sellers.$inferSelect,
+  passes: { itemsSeen: number }[],
+): { reachable: number; total: number } | null {
+  if (seller.inventoryTotal === null) return null;
+  return {
+    reachable: reachableItems(seller.inventoryTotal, passes, seller.scanCompletedAt !== null),
+    total: seller.inventoryTotal,
+  };
+}
+
+/** The seller's active, enriched items (faded ones included); `extra` narrows them, e.g. to the faded ones. */
+function countForSale(db: Db, username: string, ...extra: SQL[]): number {
+  return db
+    .select({ count: sql<number>`count(*)` })
+    .from(sellerInventory)
+    .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
+    .where(
+      and(
+        eq(sellerInventory.sellerUsername, username),
+        eq(sellerInventory.status, "active"),
+        ...extra,
+      ),
+    )
+    .all()[0]!.count;
+}
+
 /** Completed release_detail jobs needed before an ETA is worth showing. */
 export const ETA_MIN_SAMPLES = 10;
 /** The ETA rate is taken from this many most recently completed jobs. */
@@ -125,21 +153,23 @@ function estimateEtaSeconds(doneAt: number[], remaining: number): number | null 
 export function createSellersRouter(deps: SellersRouterDeps): Router {
   const router = Router();
 
-  router.get("/", (_req, res) => {
-    const rows = deps.db
-      .select({
-        username: sellers.username,
-        lastIndexedAt: sellers.lastIndexedAt,
-        lastIndexStatus: sellers.lastIndexStatus,
-      })
-      .from(sellers)
-      .all();
+  router.get("/", (req, res) => {
+    const { uid } = req.user!;
+    const rows = deps.db.select().from(sellers).all();
 
-    const dto: SellerSummaryDto[] = rows.map((row) => ({
-      username: row.username,
-      lastIndexedAt: row.lastIndexedAt?.toISOString() ?? null,
-      lastIndexStatus: row.lastIndexStatus,
-    }));
+    const dto: SellerSummaryDto[] = rows.map((row) => {
+      const passes = row.currentRunId
+        ? deps.db.select().from(scanPasses).where(eq(scanPasses.runId, row.currentRunId)).all()
+        : [];
+      return {
+        username: row.username,
+        lastIndexedAt: row.lastIndexedAt?.toISOString() ?? null,
+        lastIndexStatus: row.lastIndexStatus,
+        forSaleCount: countForSale(deps.db, row.username),
+        fadedCount: countForSale(deps.db, row.username, isFadedFor(uid)),
+        coverage: coverageOf(row, passes),
+      };
+    });
     res.json(dto);
   });
 
@@ -261,10 +291,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       retryingAt: pause?.retryAt.toISOString() ?? null,
       backoffMs: pause?.backoffMs ?? null,
       scanPasses: scanPassDtos,
-      coverage:
-        seller.inventoryTotal === null
-          ? null
-          : { reachable: reachableItems(seller.inventoryTotal, passes, seller.scanCompletedAt !== null), total: seller.inventoryTotal },
+      coverage: coverageOf(seller, passes),
     };
     res.json(dto);
   });
@@ -384,15 +411,8 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .where(whereClause)
       .all()[0]!.count;
 
-    const countForSale = (...extra: SQL[]) =>
-      deps.db
-        .select({ count: sql<number>`count(*)` })
-        .from(sellerInventory)
-        .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
-        .where(and(...forSaleConditions, ...extra))
-        .all()[0]!.count;
-    const forSaleCount = countForSale();
-    const fadedCount = countForSale(isFadedFor(uid));
+    const forSaleCount = countForSale(deps.db, username);
+    const fadedCount = countForSale(deps.db, username, isFadedFor(uid));
 
     const orderExpr = sortColumn(sortField);
     const orderBy = isDescending ? desc(orderExpr) : asc(orderExpr);
