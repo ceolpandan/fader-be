@@ -9,11 +9,13 @@ import { discogsQueueJobs } from "../db/schema";
 import { DiscogsAuthError, DiscogsRateLimitError, DiscogsTransientError } from "../discogs-client";
 import {
   DiscogsQueue,
+  INLINE_PRIORITY,
   MAX_CAP_RETRIES,
   NonRetryableError,
   PACING_MS,
   QueueUnavailableError,
   QueueWaitTimeoutError,
+  SCAN_PRIORITY,
 } from "./discogs-queue";
 
 describe("DiscogsQueue", () => {
@@ -151,6 +153,74 @@ describe("DiscogsQueue", () => {
     await vi.advanceTimersByTimeAsync(PACING_MS * 2);
 
     expect(order).toEqual(["release-7", "page-1", "page-2"]);
+  });
+
+  describe("scan priority", () => {
+    const record = () => {
+      const order: string[] = [];
+      queue.registerHandler(
+        "inventory_page",
+        vi.fn(async (payload: { page: number }) => {
+          order.push(`page-${payload.page}`);
+        }),
+      );
+      queue.registerHandler(
+        "release_detail",
+        vi.fn(async (payload: { releaseId: number }) => {
+          order.push(`release-${payload.releaseId}`);
+        }),
+      );
+      return order;
+    };
+    const scanPage = (page: number) =>
+      queue.enqueue({
+        runId: "run-1",
+        type: "inventory_page",
+        payload: { username: "a", page },
+        priority: SCAN_PRIORITY,
+      });
+    const detail = (releaseId: number) =>
+      queue.enqueue({ runId: "run-1", type: "release_detail", payload: { releaseId } });
+
+    it("gives enrichment a turn after every SCAN_BURST scan jobs, instead of waiting for the scan to end", async () => {
+      const order = record();
+      detail(1);
+      detail(2);
+      for (let page = 1; page <= 8; page += 1) scanPage(page);
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(PACING_MS * 9);
+
+      expect(order).toEqual([
+        "page-1", "page-2", "page-3", "release-1",
+        "page-4", "page-5", "page-6", "release-2",
+        "page-7", "page-8",
+      ]);
+    });
+
+    it("keeps scanning when no enrichment is waiting", async () => {
+      const order = record();
+      for (let page = 1; page <= 5; page += 1) scanPage(page);
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(PACING_MS * 4);
+
+      expect(order).toEqual(["page-1", "page-2", "page-3", "page-4", "page-5"]);
+    });
+
+    it("still lets an inline job go ahead of the scan", async () => {
+      const order = record();
+      for (let page = 1; page <= 4; page += 1) scanPage(page);
+      queue.enqueue({ runId: "inline", type: "release_detail", payload: { releaseId: 9 }, priority: INLINE_PRIORITY });
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(PACING_MS * 4);
+
+      expect(order[0]).toBe("release-9");
+    });
   });
 
   it("resets a job stuck in processing back to pending on start (crash recovery)", async () => {

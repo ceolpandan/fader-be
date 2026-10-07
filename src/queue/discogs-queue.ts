@@ -10,6 +10,12 @@ export const MAX_ATTEMPTS = 3;
 export const INLINE_PRIORITY = 10;
 /** Scan pages run ahead of enrichment, so a scan finishes in minutes while releases trickle in. */
 export const SCAN_PRIORITY = 5;
+/**
+ * Scan jobs in a row before a lower-priority job gets a turn. A scan always has its next page
+ * queued, so without this enrichment would wait for the whole scan; with it, enrichment gets
+ * one slot in every SCAN_BURST + 1.
+ */
+export const SCAN_BURST = 3;
 export const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 export const BASE_BACKOFF_MS = 2000;
 /** The first pause after a transient Discogs error; each further failure in a row doubles it. */
@@ -73,6 +79,8 @@ export class DiscogsQueue {
    */
   private pause: { retryAt: number; backoffMs: number } | null = null;
   private consecutiveFailures = 0;
+  /** Scan jobs claimed in a row, so lower-priority work is not starved by a long scan. */
+  private scanStreak = 0;
   private capRetries = 0;
 
   constructor(private readonly db: Db) {}
@@ -201,8 +209,13 @@ export class DiscogsQueue {
       .orderBy(desc(discogsQueueJobs.priority), asc(discogsQueueJobs.id))
       .all();
 
-    const eligible = pending.find((job) => (this.backoffUntil.get(job.id) ?? 0) <= now);
+    const ready = pending.filter((job) => (this.backoffUntil.get(job.id) ?? 0) <= now);
+    let eligible = ready[0];
+    if (eligible?.priority === SCAN_PRIORITY && this.scanStreak >= SCAN_BURST) {
+      eligible = ready.find((job) => job.priority < SCAN_PRIORITY) ?? eligible;
+    }
     if (!eligible) return null;
+    this.scanStreak = eligible.priority === SCAN_PRIORITY ? this.scanStreak + 1 : 0;
 
     this.db
       .update(discogsQueueJobs)
