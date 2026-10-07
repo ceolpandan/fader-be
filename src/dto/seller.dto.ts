@@ -57,7 +57,10 @@ export interface SellerStatusDto {
 export interface ScanPassDto {
   sort: ScanSort;
   order: ScanOrder;
-  /** `capped`: Discogs refused to paginate any further, so the pass ended cleanly. */
+  /**
+   * `capped`: Discogs refused to paginate any further, so the pass ended cleanly.
+   * `failed`: a page kept failing, so the pass was abandoned and the scan moved on.
+   */
   status: ScanPassStatus;
   pagesPlanned: number;
   pagesFetched: number;

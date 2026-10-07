@@ -53,7 +53,7 @@ describe("DiscogsQueue", () => {
 
     expect(handler).toHaveBeenCalledWith(
       { username: "some-seller", page: 1 },
-      { runId: "run-1", jobId },
+      { runId: "run-1", jobId, attempt: 1 },
     );
 
     const [row] = db.select().from(discogsQueueJobs).where(eq(discogsQueueJobs.id, jobId)).all();

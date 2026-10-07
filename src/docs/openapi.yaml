@@ -500,14 +500,14 @@ components:
         coverage:
           type: object
           nullable: true
-          description: Inventory items we can reach out of all the seller lists. Discogs only serves the first 100 pages of an inventory, so reachable is lower than total for large sellers.
+          description: Distinct inventory items the current run has seen, out of all the seller lists. Discogs only serves the first 100 pages of an inventory per sort order, so reachable is lower than total for large sellers until further sort orders have run. A single pass that returned every listing counts as the whole inventory.
           required: [reachable, total]
           properties:
             reachable: { type: integer }
             total: { type: integer }
         scanPasses:
           type: array
-          description: The sorted inventory passes of the current run, in the order they ran. A second, descending pass only runs when the first could not reach every item.
+          description: The sorted inventory passes of the current run, in the order they ran. Passes (each sort ascending, then descending) keep running until every inventory item has been seen or all of them have run.
           items:
             $ref: "#/components/schemas/ScanPassDto"
 
@@ -516,12 +516,12 @@ components:
       required:
         [sort, order, status, pagesPlanned, pagesFetched, itemsSeen, itemsNew, startedAt, endedAt]
       properties:
-        sort: { type: string, enum: [artist] }
+        sort: { type: string, enum: [artist, listed, label, catno, item, price, audio] }
         order: { type: string, enum: [asc, desc] }
         status:
           type: string
-          enum: [running, done, capped]
-          description: capped means Discogs refused to paginate any further, so the pass ended cleanly.
+          enum: [running, done, capped, failed]
+          description: capped means Discogs refused to paginate any further, so the pass ended cleanly. failed means a page kept failing, so the pass was abandoned and the scan moved on.
         pagesPlanned: { type: integer }
         pagesFetched: { type: integer }
         itemsSeen: { type: integer, description: Listings Discogs returned in this pass. }
