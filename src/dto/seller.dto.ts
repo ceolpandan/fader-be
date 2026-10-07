@@ -17,6 +17,12 @@ export interface SellerSummaryDto {
   username: string;
   lastIndexedAt: string | null;
   lastIndexStatus: SellerIndexStatus;
+  /** The seller's active, enriched items, faded ones included. */
+  forSaleCount: number;
+  /** How many of forSaleCount are faded for the collector. */
+  fadedCount: number;
+  /** Inventory items we can reach (Discogs caps pagination) out of all the seller lists. */
+  coverage: { reachable: number; total: number } | null;
 }
 
 export type IndexingPhase = "scanning" | "enriching" | "done";

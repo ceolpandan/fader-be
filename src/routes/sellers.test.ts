@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, fades, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
 import { DiscogsTransientError } from "../discogs-client";
 import { DiscogsQueue, PACING_MS } from "../queue/discogs-queue";
 import { checkRunCompletion } from "../indexing/run-completion";
@@ -500,6 +500,106 @@ describe("sellers routes", () => {
       const res = await authedRequest(app).get("/sellers");
       expect(res.status).toBe(200);
       expect(res.body).toEqual([]);
+    });
+
+    describe("counters", () => {
+      function seedItem(
+        username: string,
+        releaseId: number,
+        { status = "active", masterId = null }: { status?: "active" | "sold"; masterId?: number | null } = {},
+      ) {
+        const now = new Date();
+        db.insert(releases)
+          .values({
+            id: releaseId,
+            title: `R${releaseId}`,
+            masterId,
+            genres: [],
+            styles: [],
+            formats: [],
+            labelIds: [],
+            artists: [],
+          })
+          .onConflictDoNothing()
+          .run();
+        db.insert(sellerInventory)
+          .values({ sellerUsername: username, releaseId, status, firstSeenAt: now, lastSeenAt: now, soldAt: null })
+          .run();
+      }
+
+      async function listed(username: string) {
+        const res = await authedRequest(app).get("/sellers");
+        return res.body.find((s: { username: string }) => s.username === username);
+      }
+
+      beforeEach(async () => {
+        await authedRequest(app).post("/sellers/seller-a/index").send();
+      });
+
+      it("counts the active, enriched items for sale, and none for a seller with none", async () => {
+        seedItem("seller-a", 1);
+        seedItem("seller-a", 2);
+        seedItem("seller-a", 3, { status: "sold" });
+        // Discovered but not enriched yet: no releases row.
+        db.insert(sellerInventory)
+          .values({
+            sellerUsername: "seller-a",
+            releaseId: 4,
+            status: "active",
+            firstSeenAt: new Date(),
+            lastSeenAt: new Date(),
+            soldAt: null,
+          })
+          .run();
+        await authedRequest(app).post("/sellers/seller-b/index").send();
+
+        expect(await listed("seller-a")).toMatchObject({ forSaleCount: 2, fadedCount: 0 });
+        expect(await listed("seller-b")).toMatchObject({ forSaleCount: 0, fadedCount: 0 });
+      });
+
+      it("counts the items faded for the collector, by release or by master", async () => {
+        seedItem("seller-a", 1);
+        seedItem("seller-a", 2, { masterId: 50 });
+        seedItem("seller-a", 3);
+        db.insert(fades).values({ uid: "test-uid", kind: "release", id: 1, createdAt: new Date() }).run();
+        db.insert(fades).values({ uid: "test-uid", kind: "master", id: 50, createdAt: new Date() }).run();
+
+        expect(await listed("seller-a")).toMatchObject({ forSaleCount: 3, fadedCount: 2 });
+      });
+
+      it("ignores other collectors' fades", async () => {
+        seedItem("seller-a", 1);
+        db.insert(fades).values({ uid: "someone-else", kind: "release", id: 1, createdAt: new Date() }).run();
+
+        expect(await listed("seller-a")).toMatchObject({ forSaleCount: 1, fadedCount: 0 });
+      });
+
+      it("reports coverage, null before the first scan", async () => {
+        expect((await listed("seller-a")).coverage).toBeNull();
+
+        db.update(sellers)
+          .set({ inventoryTotal: 14_320, scanCompletedAt: new Date() })
+          .where(eq(sellers.username, "seller-a"))
+          .run();
+        const seller = db.select().from(sellers).where(eq(sellers.username, "seller-a")).get();
+        db.insert(scanPasses)
+          .values({
+            runId: seller!.currentRunId!,
+            sellerUsername: "seller-a",
+            sort: "artist",
+            order: "desc",
+            status: "capped",
+            pagesPlanned: 100,
+            pagesFetched: 100,
+            itemsSeen: 10_000,
+            itemsNew: 10_000,
+            startedAt: new Date(),
+            endedAt: new Date(),
+          })
+          .run();
+
+        expect((await listed("seller-a")).coverage).toEqual({ reachable: 10_000, total: 14_320 });
+      });
     });
   });
 

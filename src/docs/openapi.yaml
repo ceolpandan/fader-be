@@ -396,7 +396,7 @@ components:
 
     SellerSummaryDto:
       type: object
-      required: [username, lastIndexedAt, lastIndexStatus]
+      required: [username, lastIndexedAt, lastIndexStatus, forSaleCount, fadedCount, coverage]
       properties:
         username: { type: string }
         lastIndexedAt:
@@ -405,6 +405,20 @@ components:
         lastIndexStatus:
           type: string
           enum: [never, running, success, error]
+        forSaleCount:
+          type: integer
+          description: The seller's active, enriched items, faded ones included.
+        fadedCount:
+          type: integer
+          description: How many of forSaleCount are faded for the user.
+        coverage:
+          type: object
+          nullable: true
+          description: Inventory items we can reach out of all the seller lists; null before the first scan.
+          required: [reachable, total]
+          properties:
+            reachable: { type: integer }
+            total: { type: integer }
 
     ReleaseFormatDto:
       type: object
