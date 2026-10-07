@@ -248,6 +248,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+    delete:
+      operationId: removeSeller
+      summary: >
+        Remove a seller: stop any indexing run for it and delete the seller, its inventory links,
+        its scan passes and its queued jobs. Releases and fades are kept.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Seller removed
+        "404":
+          description: This username has never been indexed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /sellers/{username}/inventory:
     get:
       operationId: getSellerInventory

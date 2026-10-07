@@ -32,6 +32,7 @@ function authedRequest(app: Express) {
   return {
     get: (url: string) => agent.get(url).set("Authorization", `Bearer ${TEST_TOKEN}`),
     post: (url: string) => agent.post(url).set("Authorization", `Bearer ${TEST_TOKEN}`),
+    delete: (url: string) => agent.delete(url).set("Authorization", `Bearer ${TEST_TOKEN}`),
   };
 }
 
@@ -120,6 +121,80 @@ describe("sellers routes", () => {
 
       const second = await authedRequest(app).post("/sellers/some-seller/index").send();
       expect(second.status).toBe(202);
+    });
+  });
+
+  describe("DELETE /sellers/:username", () => {
+    const release = {
+      id: 1,
+      title: "T",
+      year: null,
+      country: null,
+      genres: [],
+      styles: [],
+      formats: [],
+      masterId: null,
+      thumb: null,
+      ratingAverage: null,
+      ratingCount: null,
+      haves: null,
+      wants: null,
+      labelIds: [],
+      artists: [],
+    };
+
+    it("returns 404 for a username that has never been indexed", async () => {
+      const res = await authedRequest(app).delete("/sellers/unknown-seller");
+      expect(res.status).toBe(404);
+    });
+
+    it("removes the seller, its inventory, scan passes and jobs, and keeps releases and fades", async () => {
+      await authedRequest(app).post("/sellers/some-seller/index").send();
+      await authedRequest(app).post("/sellers/other-seller/index").send();
+      const now = new Date();
+      db.insert(releases).values(release).run();
+      db.insert(sellerInventory)
+        .values([
+          { sellerUsername: "some-seller", releaseId: 1, status: "active", firstSeenAt: now, lastSeenAt: now },
+          { sellerUsername: "other-seller", releaseId: 1, status: "active", firstSeenAt: now, lastSeenAt: now },
+        ])
+        .run();
+      db.insert(scanPasses)
+        .values([
+          { runId: "r1", sellerUsername: "some-seller", sort: "artist", order: "asc", pagesPlanned: 1, status: "done", startedAt: now },
+          { runId: "r2", sellerUsername: "other-seller", sort: "artist", order: "asc", pagesPlanned: 1, status: "done", startedAt: now },
+        ])
+        .run();
+      db.insert(fades).values({ uid: "test-uid", kind: "release", id: 1, createdAt: now }).run();
+
+      const res = await authedRequest(app).delete("/sellers/some-seller");
+
+      expect(res.status).toBe(204);
+      expect(db.select().from(sellers).all().map((s) => s.username)).toEqual(["other-seller"]);
+      expect(db.select().from(sellerInventory).all().map((i) => i.sellerUsername)).toEqual(["other-seller"]);
+      expect(db.select().from(scanPasses).all().map((s) => s.sellerUsername)).toEqual(["other-seller"]);
+      expect(
+        db.select().from(discogsQueueJobs).all().map((j) => (j.payload as { username: string }).username),
+      ).toEqual(["other-seller"]);
+      expect(db.select().from(releases).all()).toHaveLength(1);
+      expect(db.select().from(fades).all()).toHaveLength(1);
+    });
+
+    it("stops a running run: its queued release_detail jobs go too", async () => {
+      const started = await authedRequest(app).post("/sellers/some-seller/index").send();
+      queue.enqueue({ runId: started.body.runId, type: "release_detail", payload: { releaseId: 5 } });
+
+      await authedRequest(app).delete("/sellers/some-seller");
+
+      expect(db.select().from(discogsQueueJobs).all()).toEqual([]);
+    });
+
+    it("lets the username be indexed again afterwards", async () => {
+      await authedRequest(app).post("/sellers/some-seller/index").send();
+      await authedRequest(app).delete("/sellers/some-seller");
+
+      const res = await authedRequest(app).post("/sellers/some-seller/index").send();
+      expect(res.status).toBe(202);
     });
   });
 
