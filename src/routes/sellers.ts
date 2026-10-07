@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { Router } from "express";
 import type { Db } from "../db/client";
@@ -223,6 +223,39 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
 
     const dto: IndexStartedDto = { username, runId };
     res.status(202).json(dto);
+  });
+
+  router.delete("/:username", (req, res) => {
+    const { username } = req.params;
+
+    const [seller] = deps.db.select().from(sellers).where(eq(sellers.username, username)).all();
+    if (!seller) {
+      res.status(404).json({ error: `${username} has never been indexed` });
+      return;
+    }
+
+    // Only what hangs off this seller goes. Releases are shared across sellers and fades belong
+    // to the collector, so both stay. Deleting the run's queued jobs stops it; a job already in
+    // flight finds the seller gone (its run id no longer matches) and writes nothing.
+    deps.db.transaction(() => {
+      deps.db
+        .delete(discogsQueueJobs)
+        .where(
+          or(
+            seller.currentRunId ? eq(discogsQueueJobs.runId, seller.currentRunId) : undefined,
+            and(
+              eq(discogsQueueJobs.type, "inventory_page"),
+              sql`json_extract(${discogsQueueJobs.payload}, '$.username') = ${username}`,
+            ),
+          ),
+        )
+        .run();
+      deps.db.delete(scanPasses).where(eq(scanPasses.sellerUsername, username)).run();
+      deps.db.delete(sellerInventory).where(eq(sellerInventory.sellerUsername, username)).run();
+      deps.db.delete(sellers).where(eq(sellers.username, username)).run();
+    });
+
+    res.status(204).end();
   });
 
   router.get("/:username", (req, res) => {

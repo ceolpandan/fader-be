@@ -170,6 +170,17 @@ export function createInventoryPageHandler(
       eq(scanPasses.order, order),
     );
 
+    /** The seller was removed (or reindexed) while this job waited or ran: it must write nothing. */
+    const isCurrentRun = (): boolean => {
+      const [seller] = deps.db
+        .select({ currentRunId: sellers.currentRunId })
+        .from(sellers)
+        .where(eq(sellers.username, username))
+        .all();
+      return seller?.currentRunId === context.runId;
+    };
+    if (!isCurrentRun()) return;
+
     const runStart = new Date(runStartedAt);
     const isFirstPass = sort === SCAN_PASSES[0]!.sort && order === SCAN_PASSES[0]!.order;
 
@@ -213,6 +224,7 @@ export function createInventoryPageHandler(
     try {
       inventoryPage = await deps.getInventory(username, page, { sort, order });
     } catch (error) {
+      if (!isCurrentRun()) return;
       if (error instanceof DiscogsPaginationCapError) {
         logger.warn(`Discogs stopped paginating ${username} (${sort} ${order}) at page ${page}`);
         endPass("capped");
@@ -241,12 +253,14 @@ export function createInventoryPageHandler(
       endPass("failed");
       return;
     }
+    if (!isCurrentRun()) return;
     const now = new Date();
     const { items, pages } = inventoryPage.pagination;
 
     if (page === 1) {
       if (isFirstPass) {
         await storeSellerMetadata(deps, username, inventoryPage);
+        if (!isCurrentRun()) return;
         deps.db
           .update(sellers)
           .set({ inventoryTotal: items, scanPagesTotal: scanPagesPlanned(items, pages) })

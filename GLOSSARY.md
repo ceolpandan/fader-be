@@ -42,6 +42,10 @@ _Avoid_: Audio link, media link
 Fetching a seller's whole inventory and enriching each release we don't have yet. Running it again for the same seller is a reindex.
 _Avoid_: Crawl, scrape, sync
 
+**Remove** (a seller):
+Delete a seller and what hangs off it (inventory links, scan passes, queued jobs), stopping any run in progress. Releases stay, because other sellers share them, and so do fades. It is also how a collector cancels indexing. A remove is never a fade.
+_Avoid_: Delete, forget, cancel, stop
+
 **Run**:
 One execution of indexing for one seller, from start to finish. A reindex is a new run for a seller we have indexed before. A run can end successfully even when some releases failed to enrich.
 _Avoid_: Job, task

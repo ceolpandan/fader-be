@@ -101,6 +101,30 @@ describe("inventory_page handler", () => {
   const passRows = () => db.select().from(scanPasses).all();
   const nextPayload = { username: "some-seller", runStartedAt: RUN_STARTED };
 
+  it("writes and enqueues nothing when the seller is removed while the page is being fetched", async () => {
+    const getInventory = vi.fn(async () => {
+      db.delete(sellers).where(eq(sellers.username, "some-seller")).run();
+      return inventoryPage(1, 2, [732194]);
+    });
+    const handler = createInventoryPageHandler({ db, enqueue, getInventory });
+
+    await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+
+    expect(db.select().from(sellerInventory).all()).toEqual([]);
+    expect(passRows()).toEqual([]);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch at all when the seller is already gone", async () => {
+    db.delete(sellers).where(eq(sellers.username, "some-seller")).run();
+    const getInventory = vi.fn(async () => inventoryPage(1, 1, [1]));
+    const handler = createInventoryPageHandler({ db, enqueue, getInventory });
+
+    await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+
+    expect(getInventory).not.toHaveBeenCalled();
+  });
+
   it("upserts seller_inventory but enqueues no release_detail while more pages remain", async () => {
     const getInventory = vi.fn(async () => inventoryPage(1, 2, [732194]));
     const handler = createInventoryPageHandler({ db, enqueue, getInventory });
