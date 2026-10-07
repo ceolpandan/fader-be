@@ -9,7 +9,14 @@ import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs, fades, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
 import { DiscogsTransientError } from "../discogs-client";
-import { DiscogsQueue, PACING_MS } from "../queue/discogs-queue";
+import { createSellerProfileHandler } from "../indexing/seller-profile-handler";
+import {
+  DiscogsQueue,
+  NonRetryableError,
+  PACING_MS,
+  QueueUnavailableError,
+  QueueWaitTimeoutError,
+} from "../queue/discogs-queue";
 import { checkRunCompletion } from "../indexing/run-completion";
 import { createApp } from "../app";
 
@@ -42,6 +49,18 @@ describe("sellers routes", () => {
   let queue: DiscogsQueue;
   let app: Express;
 
+  /** The queue is not running here, so settle a seller_profile job inline with the real handler. */
+  function useProfileLookup(getUserProfile: (username: string) => Promise<{ username: string }>): void {
+    const handler = createSellerProfileHandler({
+      db,
+      enqueue: (job) => queue.enqueue(job),
+      getUserProfile,
+    });
+    vi.spyOn(queue, "enqueueAndWait").mockImplementation(async (job) => {
+      await handler(job.payload as { username: string }, { runId: job.runId, jobId: 0 });
+    });
+  }
+
   beforeEach(() => {
     dbPath = path.join(os.tmpdir(), `fader-test-${Date.now()}-${Math.random()}.sqlite`);
     db = createDb(dbPath);
@@ -49,6 +68,7 @@ describe("sellers routes", () => {
     queue = new DiscogsQueue(db);
     queue.onSettled((job) => checkRunCompletion(db, job.runId));
     app = createApp({ db, queue });
+    useProfileLookup(async (username) => ({ username }));
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 
@@ -91,15 +111,75 @@ describe("sellers routes", () => {
       });
     });
 
-    it("does not leave the seller running when enqueueing the first job fails", async () => {
+    it("does not leave a seller behind when enqueueing the first job fails", async () => {
       vi.spyOn(queue, "enqueue").mockImplementation(() => {
         throw new Error("disk full");
       });
 
       const res = await authedRequest(app).post("/sellers/some-seller/index").send();
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(502);
       expect(db.select().from(sellers).where(eq(sellers.username, "some-seller")).all()).toEqual([]);
+    });
+
+    it("returns 404 and creates nothing when Discogs has no such user", async () => {
+      useProfileLookup(async () => {
+        throw new NonRetryableError("not found");
+      });
+
+      const res = await authedRequest(app).post("/sellers/nobody-here/index").send();
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "No Discogs user named 'nobody-here'" });
+      expect(db.select().from(sellers).all()).toEqual([]);
+      expect(db.select().from(discogsQueueJobs).all()).toEqual([]);
+    });
+
+    it("returns 503 or 504 and creates nothing while Discogs is unavailable", async () => {
+      vi.spyOn(queue, "enqueueAndWait").mockRejectedValueOnce(new QueueUnavailableError("x"));
+      const unavailable = await authedRequest(app).post("/sellers/some-seller/index").send();
+      expect(unavailable.status).toBe(503);
+
+      vi.spyOn(queue, "enqueueAndWait").mockRejectedValueOnce(new QueueWaitTimeoutError("x"));
+      const timedOut = await authedRequest(app).post("/sellers/some-seller/index").send();
+      expect(timedOut.status).toBe(504);
+
+      expect(db.select().from(sellers).all()).toEqual([]);
+    });
+
+    it("stores the seller under the casing Discogs reports", async () => {
+      useProfileLookup(async () => ({ username: "FooBar" }));
+
+      const res = await authedRequest(app).post("/sellers/foobar/index").send();
+
+      expect(res.status).toBe(202);
+      expect(res.body.username).toBe("FooBar");
+      expect(db.select().from(sellers).all().map((s) => s.username)).toEqual(["FooBar"]);
+    });
+
+    it("matches an existing seller case-insensitively instead of creating a second", async () => {
+      useProfileLookup(async () => ({ username: "FooBar" }));
+      await authedRequest(app).post("/sellers/FooBar/index").send();
+      db.update(sellers).set({ lastIndexStatus: "success" }).run();
+
+      const again = await authedRequest(app).post("/sellers/foobar/index").send();
+      expect(again.status).toBe(202);
+      expect(again.body.username).toBe("FooBar");
+      expect(db.select().from(sellers).all()).toHaveLength(1);
+
+      const running = await authedRequest(app).post("/sellers/FOOBAR/index").send();
+      expect(running.status).toBe(409);
+    });
+
+    it("trims the username before checking it", async () => {
+      const res = await authedRequest(app).post("/sellers/%20some-seller%20/index").send();
+      expect(res.status).toBe(202);
+      expect(res.body.username).toBe("some-seller");
+    });
+
+    it("returns 400 for a blank username", async () => {
+      const res = await authedRequest(app).post("/sellers/%20/index").send();
+      expect(res.status).toBe(400);
     });
 
     it("returns 409 if indexing is already running for that username", async () => {

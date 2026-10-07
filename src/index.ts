@@ -5,6 +5,7 @@ import { createApp } from "./app";
 import { createDb } from "./db/client";
 import { getInventory, getRelease, getUserProfile } from "./discogs-client";
 import { createInventoryPageHandler } from "./indexing/inventory-page-handler";
+import { createSellerProfileHandler } from "./indexing/seller-profile-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
 import { checkRunCompletion, failOrphanedRuns, markRunAborted } from "./indexing/run-completion";
 import { startSoldInventoryPurgeLoop } from "./indexing/sold-inventory-purge";
@@ -36,6 +37,10 @@ queue.registerHandler(
   }),
 );
 queue.registerHandler("release_detail", createReleaseDetailHandler({ db, getRelease }));
+queue.registerHandler(
+  "seller_profile",
+  createSellerProfileHandler({ db, enqueue: (job) => queue.enqueue(job), getUserProfile }),
+);
 queue.onSettled((job) => checkRunCompletion(db, job.runId));
 queue.onRunAborted((runId) => markRunAborted(db, runId));
 queue.start();
