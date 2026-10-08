@@ -85,6 +85,13 @@
       "when": 1791443819314,
       "tag": "0011_scan_listings",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791462226501,
+      "tag": "0012_user_settings",
+      "breakpoints": true
     }
   ]
 }

@@ -12,6 +12,7 @@ import { createFadeRouter } from "./routes/fade";
 import { mastersRouter } from "./routes/masters";
 import { createReleasesRouter } from "./routes/releases";
 import { createSellersRouter } from "./routes/sellers";
+import { createSettingsRouter } from "./routes/settings";
 import { logger } from "./util/logger";
 
 const openapiPath = path.join(__dirname, "docs", "openapi.yaml");
@@ -44,6 +45,7 @@ export function createApp(deps: AppDeps): Express {
   app.use("/masters", mastersRouter);
   app.use("/fade", createFadeRouter(deps));
   app.use("/sellers", createSellersRouter(deps));
+  app.use("/settings", createSettingsRouter(deps));
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- express requires 4-arg error handlers
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

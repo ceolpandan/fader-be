@@ -169,6 +169,17 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
 
 export type FadeKind = "master" | "release";
 
+export const THEMES = ["light", "dark"] as const;
+export type Theme = (typeof THEMES)[number];
+export const DEFAULT_THEME: Theme = "dark";
+
+/** A user's settings, one row per user once they change any; a missing row means the defaults. */
+export const userSettings = sqliteTable("user_settings", {
+  uid: text("uid").primaryKey(),
+  theme: text("theme").$type<Theme>().notNull().default(DEFAULT_THEME),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
 /** What a user faded: a master (hides every version under it) or a release without a master. */
 export const fades = sqliteTable(
   "fades",
