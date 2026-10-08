@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, fades, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, fades, releases, scanListings, scanPasses, sellerInventory, sellers } from "../db/schema";
 import { DiscogsTransientError } from "../discogs-client";
 import { createSellerProfileHandler } from "../indexing/seller-profile-handler";
 import {
@@ -245,6 +245,12 @@ describe("sellers routes", () => {
           { runId: "r2", sellerUsername: "other-seller", sort: "artist", order: "asc", pagesPlanned: 1, status: "done", startedAt: now },
         ])
         .run();
+      db.insert(scanListings)
+        .values([
+          { runId: "r1", sellerUsername: "some-seller", sort: "artist", order: "asc", listingId: 1 },
+          { runId: "r2", sellerUsername: "other-seller", sort: "artist", order: "asc", listingId: 1 },
+        ])
+        .run();
       db.insert(fades).values({ uid: "test-uid", kind: "release", id: 1, createdAt: now }).run();
 
       const res = await authedRequest(app).delete("/sellers/some-seller");
@@ -253,6 +259,7 @@ describe("sellers routes", () => {
       expect(db.select().from(sellers).all().map((s) => s.username)).toEqual(["other-seller"]);
       expect(db.select().from(sellerInventory).all().map((i) => i.sellerUsername)).toEqual(["other-seller"]);
       expect(db.select().from(scanPasses).all().map((s) => s.sellerUsername)).toEqual(["other-seller"]);
+      expect(db.select().from(scanListings).all().map((l) => l.sellerUsername)).toEqual(["other-seller"]);
       expect(
         db.select().from(discogsQueueJobs).all().map((j) => (j.payload as { username: string }).username),
       ).toEqual(["other-seller"]);
@@ -463,6 +470,15 @@ describe("sellers routes", () => {
           }
         };
 
+        /** Listing ids `from`..`to` read by the pass of `sort` and `order`. */
+        const read = (runId: string, order: "asc" | "desc", from: number, to: number) => {
+          for (let listingId = from; listingId <= to; listingId += 1) {
+            db.insert(scanListings)
+              .values({ runId, sellerUsername: "some-seller", sort: "artist", order, listingId })
+              .run();
+          }
+        };
+
         it("counts the distinct items seen since the run's first pass began, a count that grows while scanning", async () => {
           const runId = await start();
           seller({ inventoryTotal: 42_223, scanPagesTotal: 1400, scanPagesFetched: 12 });
@@ -487,15 +503,44 @@ describe("sellers routes", () => {
           expect(res.body.coverage).toEqual({ reachable: 140, total: 42_223 });
         });
 
-        it("reports the whole inventory once a single pass returned every listing", async () => {
+        it("reports the distinct items as the whole inventory once a single pass returned every listing, even with several copies of a release", async () => {
           const runId = await start();
           seller({ inventoryTotal: 50, scanCompletedAt: new Date() });
           pass(runId, "asc", 50, "done");
+          read(runId, "asc", 1, 50);
           seen(40, new Date("2026-01-01T00:01:00.000Z"));
 
           const res = await authedRequest(app).get("/sellers/some-seller");
 
-          expect(res.body.coverage).toEqual({ reachable: 50, total: 50 });
+          expect(res.body.coverage).toEqual({ reachable: 40, total: 40 });
+        });
+
+        it("reports the distinct items as the whole inventory once the ascending and descending passes of one sort saw every listing", async () => {
+          const runId = await start();
+          seller({ inventoryTotal: 15_308, scanCompletedAt: new Date() });
+          pass(runId, "asc", 10_000, "done");
+          pass(runId, "desc", 5_400, "done");
+          read(runId, "asc", 1, 10_000);
+          read(runId, "desc", 9_909, 15_308);
+          seen(140, new Date("2026-01-01T00:01:00.000Z"));
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+
+          expect(res.body.coverage).toEqual({ reachable: 140, total: 140 });
+        });
+
+        it("is not covered while fewer distinct listings were read than Discogs reports, however many items the passes returned", async () => {
+          const runId = await start();
+          seller({ inventoryTotal: 15_308, scanCompletedAt: new Date() });
+          pass(runId, "asc", 10_000, "done");
+          pass(runId, "desc", 5_400, "done");
+          read(runId, "asc", 1, 10_000);
+          read(runId, "desc", 9_909, 15_000);
+          seen(140, new Date("2026-01-01T00:01:00.000Z"));
+
+          const res = await authedRequest(app).get("/sellers/some-seller");
+
+          expect(res.body.coverage).toEqual({ reachable: 140, total: 15_308 });
         });
 
         it("has no passes before the scan starts", async () => {
@@ -631,6 +676,18 @@ describe("sellers routes", () => {
 
         const res = await authedRequest(app).get("/sellers/some-seller");
         expect(res.body).toMatchObject({ phase: "scanning", scan: null, coverage: null });
+      });
+
+      it("forgets the listings the previous run read when indexing again", async () => {
+        const firstRun = await start();
+        db.insert(scanListings)
+          .values({ runId: firstRun, sellerUsername: "some-seller", sort: "artist", order: "asc", listingId: 1 })
+          .run();
+        seller({ lastIndexStatus: "success", scanCompletedAt: new Date() });
+
+        await start();
+
+        expect(db.select().from(scanListings).all()).toEqual([]);
       });
     });
 

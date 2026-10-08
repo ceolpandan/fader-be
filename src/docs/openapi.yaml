@@ -550,7 +550,7 @@ components:
         coverage:
           type: object
           nullable: true
-          description: Distinct inventory items the current run has seen, out of all the seller lists. Discogs only serves the first 100 pages of an inventory per sort order, so reachable is lower than total for large sellers until further sort orders have run. A single pass that returned every listing counts as the whole inventory.
+          description: Distinct inventory items the current run has seen, out of all the seller lists. Discogs only serves the first 100 pages of an inventory per sort order, so reachable is lower than total for large sellers until further sort orders have run. Once the scan has read as many distinct listings as Discogs reports, total is the distinct item count (several copies of a release are one item), which can be lower than the listing count Discogs shows.
           required: [reachable, total]
           properties:
             reachable: { type: integer }

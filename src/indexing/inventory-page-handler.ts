@@ -1,6 +1,13 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { discogsQueueJobs, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
+import {
+  discogsQueueJobs,
+  releases,
+  scanListings,
+  scanPasses,
+  sellerInventory,
+  sellers,
+} from "../db/schema";
 import type {
   InventoryPagePayload,
   ReleaseDetailPayload,
@@ -16,7 +23,7 @@ import {
 } from "../discogs-client";
 import { MAX_ATTEMPTS, NonRetryableError, SCAN_PRIORITY } from "../queue/discogs-queue";
 import type { EnqueueInput, JobHandler } from "../queue/discogs-queue";
-import { isInventoryCovered, observedItems } from "./coverage";
+import { isInventoryCovered, observedListings } from "./coverage";
 import type { DiscogsInventoryPage, DiscogsUserProfile } from "../types/discogs-api";
 import { logger } from "../util/logger";
 
@@ -82,9 +89,11 @@ export const SCAN_PASSES: readonly ScanPassSpec[] = (
 ]);
 
 /**
- * Pages a pass will fetch. The ascending pass takes everything Discogs lets it; the descending
- * pass only reaches for what the ascending one could not (the far end of the sort), so it plans
- * nothing for an inventory that fits in the ascending pass.
+ * Pages a pass will fetch at least. The ascending pass takes everything Discogs lets it; the
+ * descending pass only reaches for what the ascending one could not (the far end of the sort), so
+ * it plans nothing for an inventory that fits in the ascending pass. The inventory can shift while
+ * it is scanned, so a descending pass keeps going past its plan until it meets a listing the
+ * ascending pass of the same sort read (see `createInventoryPageHandler`).
  */
 export function passPagesPlanned(order: ScanOrder, items: number, pages: number): number {
   if (order === "asc") return Math.min(pages, MAX_SCAN_PAGES);
@@ -198,8 +207,7 @@ export function createInventoryPageHandler(
 
       const [seller] = deps.db.select().from(sellers).where(eq(sellers.username, username)).all();
       const total = seller?.inventoryTotal ?? 0;
-      const passes = deps.db.select().from(scanPasses).where(eq(scanPasses.runId, context.runId)).all();
-      const covered = isInventoryCovered(total, observedItems(deps.db, username, runStart), passes);
+      const covered = isInventoryCovered(total, observedListings(deps.db, context.runId));
 
       const next = covered ? null : nextPass({ sort, order }, total);
       if (!next) {
@@ -295,8 +303,31 @@ export function createInventoryPageHandler(
         .run();
     }
 
+    /** Whether this page holds a listing the ascending pass of the same sort read. */
+    let meetsAscendingPass = false;
     let itemsNew = 0;
     for (const listing of inventoryPage.listings) {
+      if (order === "desc" && !meetsAscendingPass) {
+        meetsAscendingPass =
+          deps.db
+            .select({ listingId: scanListings.listingId })
+            .from(scanListings)
+            .where(
+              and(
+                eq(scanListings.runId, context.runId),
+                eq(scanListings.sort, sort),
+                eq(scanListings.order, "asc"),
+                eq(scanListings.listingId, listing.id),
+              ),
+            )
+            .all().length > 0;
+      }
+      deps.db
+        .insert(scanListings)
+        .values({ runId: context.runId, sellerUsername: username, sort, order, listingId: listing.id })
+        .onConflictDoNothing()
+        .run();
+
       const [existing] = deps.db
         .select({ lastSeenAt: sellerInventory.lastSeenAt })
         .from(sellerInventory)
@@ -344,7 +375,20 @@ export function createInventoryPageHandler(
     const [pass] = deps.db.select().from(scanPasses).where(passKey).all();
     const planned = pass?.pagesPlanned ?? passPagesPlanned(order, items, pages);
 
-    if (inventoryPage.pagination.urls.next && page < planned) {
+    /** Past its plan a pass is still short of the ascending pass: the page it just read counts as one more planned. */
+    if (page > planned) {
+      deps.db.update(scanPasses).set({ pagesPlanned: page }).where(passKey).run();
+      deps.db
+        .update(sellers)
+        .set({ scanPagesTotal: sql`${sellers.scanPagesTotal} + 1` })
+        .where(eq(sellers.username, username))
+        .run();
+    }
+
+    const reachedPlan = page >= planned;
+    const keepGoing =
+      !reachedPlan || (order === "desc" && !meetsAscendingPass && page < MAX_SCAN_PAGES);
+    if (inventoryPage.pagination.urls.next && keepGoing) {
       deps.enqueue({
         runId: context.runId,
         type: "inventory_page",

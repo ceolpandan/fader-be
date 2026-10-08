@@ -4,7 +4,7 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { Router } from "express";
 import type { Db } from "../db/client";
 import { isFadedFor, isNotFadedFor } from "../db/fades";
-import { discogsQueueJobs, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, releases, scanListings, scanPasses, sellerInventory, sellers } from "../db/schema";
 import type {
   IndexStartedDto,
   SellerInventoryFacetsDto,
@@ -14,7 +14,7 @@ import type {
   SellerStatusDto,
   SellerSummaryDto,
 } from "../dto/seller.dto";
-import { isInventoryCovered, observedItems } from "../indexing/coverage";
+import { isInventoryCovered, observedItems, observedListings } from "../indexing/coverage";
 import { MAX_REACHABLE_ITEMS } from "../indexing/inventory-page-handler";
 import {
   NonRetryableError,
@@ -26,33 +26,33 @@ import {
 import { logger } from "../util/logger";
 
 /**
- * Inventory items the run has seen so far: distinct items since its first pass began, or all of
- * them once one pass returned every listing. A run that predates scan passes falls back to what
- * a single pass can reach.
+ * Inventory items the run has seen so far: distinct items since its first pass began, out of
+ * Discogs' listing total. Once the scan has covered every listing the distinct count is the whole
+ * inventory (several copies of a release are one item), so the total drops to it. A run that
+ * predates scan passes falls back to what a single pass can reach.
  */
-function reachableItems(
+function coverageNumbers(
   db: Db,
   seller: typeof sellers.$inferSelect,
   total: number,
-  passes: { itemsSeen: number; startedAt: Date }[],
-): number {
-  if (passes.length === 0) return Math.min(total, MAX_REACHABLE_ITEMS);
+  passes: { startedAt: Date }[],
+): { reachable: number; total: number } {
+  if (passes.length === 0) return { reachable: Math.min(total, MAX_REACHABLE_ITEMS), total };
   const since = new Date(Math.min(...passes.map((pass) => pass.startedAt.getTime())));
   const observed = observedItems(db, seller.username, since);
-  return isInventoryCovered(total, observed, passes) ? total : observed;
+  return seller.currentRunId && isInventoryCovered(total, observedListings(db, seller.currentRunId))
+    ? { reachable: observed, total: observed }
+    : { reachable: observed, total };
 }
 
 /** How much of a seller's inventory the scan reached; null until the first page has told us the total. */
 function coverageOf(
   db: Db,
   seller: typeof sellers.$inferSelect,
-  passes: { itemsSeen: number; startedAt: Date }[],
+  passes: { startedAt: Date }[],
 ): { reachable: number; total: number } | null {
   if (seller.inventoryTotal === null) return null;
-  return {
-    reachable: reachableItems(db, seller, seller.inventoryTotal, passes),
-    total: seller.inventoryTotal,
-  };
+  return coverageNumbers(db, seller, seller.inventoryTotal, passes);
 }
 
 /** The seller's active, enriched items (faded ones included); `extra` narrows them, e.g. to the faded ones. */
@@ -195,6 +195,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     const runStartedAt = new Date().toISOString();
 
     deps.db.transaction(() => {
+      deps.db.delete(scanListings).where(eq(scanListings.sellerUsername, username)).run();
       deps.db
         .update(sellers)
         .set({
@@ -297,6 +298,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
         )
         .run();
       deps.db.delete(scanPasses).where(eq(scanPasses.sellerUsername, username)).run();
+      deps.db.delete(scanListings).where(eq(scanListings.sellerUsername, username)).run();
       deps.db.delete(sellerInventory).where(eq(sellerInventory.sellerUsername, username)).run();
       deps.db.delete(sellers).where(eq(sellers.username, username)).run();
     });

@@ -67,7 +67,7 @@ One sorted walk over a seller's inventory within a scan. Discogs serves only the
 _Avoid_: Round, sweep
 
 **Coverage**:
-How many of a seller's inventory items a scan reached: distinct items seen in the run, out of Discogs' listing total. A pass that returned every listing counts as full coverage, since several copies of a release would otherwise never add up to the total.
+How many of a seller's inventory items a scan reached: distinct items seen in the run, out of Discogs' listing total while the scan is still short of it. Once the scan has read as many distinct listings as Discogs reports (a descending pass runs past its plan until it meets a listing the ascending pass of the same sort read), the total becomes the distinct item count, so our counts can be lower than Discogs' own: several copies of a release are one inventory item here, by design.
 _Avoid_: Completeness, progress
 
 ## Discogs access
