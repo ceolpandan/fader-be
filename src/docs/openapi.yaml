@@ -157,6 +157,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /settings:
+    get:
+      operationId: getSettings
+      summary: The signed-in user's settings
+      description: >
+        A setting the user never changed holds its default, so a user with no
+        stored settings gets them all.
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsDto"
+    patch:
+      operationId: updateSettings
+      summary: Change some of the signed-in user's settings
+      description: >
+        Takes any subset of the settings; the ones left out stay as they are.
+        An empty body changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSettingsRequestDto"
+      responses:
+        "200":
+          description: The settings after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsDto"
+        "400":
+          description: A setting holds a value it does not allow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /masters/{id}:
     get:
       operationId: getMaster
@@ -703,6 +742,23 @@ components:
           enum: [master, release]
         id:
           type: integer
+
+    SettingsDto:
+      type: object
+      required: [theme]
+      properties:
+        theme:
+          type: string
+          enum: [light, dark]
+          description: The colour theme of the app. Dark until the user picks light.
+
+    UpdateSettingsRequestDto:
+      type: object
+      description: Any subset of SettingsDto.
+      properties:
+        theme:
+          type: string
+          enum: [light, dark]
 
     FadedIdsDto:
       type: object
