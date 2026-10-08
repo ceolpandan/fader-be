@@ -5,15 +5,17 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, releases, scanPasses, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, releases, scanListings, scanPasses, sellerInventory, sellers } from "../db/schema";
 import { DiscogsAuthError, DiscogsNotFoundError, DiscogsPaginationCapError } from "../discogs-client";
 import type { DiscogsInventoryPage, DiscogsUserProfile } from "../types/discogs-api";
 import { createInventoryPageHandler, SCAN_PASSES } from "./inventory-page-handler";
 import { SCAN_PRIORITY, type EnqueueInput } from "../queue/discogs-queue";
 
-function listing(releaseId: number) {
+/** A listing of a release; `listingId` defaults to one copy per release. */
+function listing(entry: number | [releaseId: number, listingId: number]) {
+  const [releaseId, listingId] = typeof entry === "number" ? [entry, entry * 10] : entry;
   return {
-    id: releaseId * 10,
+    id: listingId,
     status: "For Sale",
     price: { currency: "USD", value: 20 },
     condition: "Mint (M)",
@@ -75,7 +77,7 @@ describe("inventory_page handler", () => {
   const inventoryPage = (
     page: number,
     pages: number,
-    releaseIds: number[],
+    releaseIds: (number | [releaseId: number, listingId: number])[],
     items = pages * 100,
   ): DiscogsInventoryPage => ({
     pagination: {
@@ -282,7 +284,10 @@ describe("inventory_page handler", () => {
     });
 
     it("fetches the descending pass with its own sort order, then moves on to listed", async () => {
-      const getInventory = vi.fn(async (_u: string, page: number) => inventoryPage(page, 150, [1000 + page], 10_250));
+      // The ascending pass read release 1001; the descending pass meets it on its last planned page.
+      const getInventory = vi.fn(async (_u: string, page: number, scan: { sort: string; order: string }) =>
+        inventoryPage(page, 150, [scan.order === "desc" && page === 3 ? 1001 : 1000 + page], 10_250),
+      );
       const handler = createInventoryPageHandler({ db, enqueue, getInventory });
       await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
       db.update(scanPasses).set({ status: "done" }).run();
@@ -300,7 +305,7 @@ describe("inventory_page handler", () => {
         pagesFetched: 3,
         status: "done",
       });
-      expect(detailJobs()).toHaveLength(3);
+      expect(detailJobs()).toHaveLength(2);
       expect(sellerRow().scanCompletedAt).toBeNull();
     });
 
@@ -350,13 +355,138 @@ describe("inventory_page handler", () => {
       const handler = createInventoryPageHandler({
         db,
         enqueue,
-        getInventory: async () => inventoryPage(1, 1, [1, 1, 2], 3),
+        getInventory: async () => inventoryPage(1, 1, [[1, 10], [1, 11], [2, 20]], 3),
       });
 
       await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
 
       expect(pageJobs()).toEqual([]);
       expect(sellerRow().scanCompletedAt).not.toBeNull();
+    });
+
+    describe("the descending pass", () => {
+      const TOTAL = 10_250; // ascending reaches 10,000; the descending pass plans the last 3 pages
+      const ids = (from: number, to: number): [number, number][] =>
+        Array.from({ length: to - from + 1 }, (_, i): [number, number] => [from + i, from + i]);
+
+      const readByAscendingPass = () => {
+        db.insert(scanPasses)
+          .values({
+            runId: "run-1",
+            sellerUsername: "some-seller",
+            sort: "artist",
+            order: "asc",
+            pagesPlanned: 100,
+            pagesFetched: 100,
+            itemsSeen: 10_000,
+            itemsNew: 10_000,
+            status: "done",
+            startedAt: new Date(),
+          })
+          .run();
+        db.insert(scanPasses)
+          .values({
+            runId: "run-1",
+            sellerUsername: "some-seller",
+            sort: "artist",
+            order: "desc",
+            pagesPlanned: 3,
+            status: "running",
+            startedAt: new Date(),
+          })
+          .run();
+        db.update(sellers).set({ inventoryTotal: TOTAL, scanPagesTotal: 103, scanPagesFetched: 100 }).run();
+        for (const [, listingId] of ids(1, 10_000)) {
+          db.insert(scanListings)
+            .values({ runId: "run-1", sellerUsername: "some-seller", sort: "artist", order: "asc", listingId })
+            .run();
+        }
+      };
+      const descPage = (page: number, from: number, to: number) => inventoryPage(page, 150, ids(from, to), TOTAL);
+      const descJob = (page: number) => ({ ...nextPayload, page, sort: "artist" as const, order: "desc" as const });
+      const queuedPages = () => pageJobs().map((job) => (job.payload as { page: number }).page);
+
+      it("finishes the scan once it meets the ascending pass and every listing has been read, with several copies of a release", async () => {
+        readByAscendingPass();
+        const pages: Record<number, DiscogsInventoryPage> = {
+          1: descPage(1, 10_151, 10_250),
+          2: descPage(2, 10_051, 10_150),
+          3: descPage(3, 9_951, 10_050),
+        };
+        const handler = createInventoryPageHandler({ db, enqueue, getInventory: async (_u, page) => pages[page]! });
+
+        for (const page of [1, 2, 3]) await handler(descJob(page), ctx);
+
+        expect(queuedPages()).toEqual([2, 3]);
+        expect(sellerRow().scanCompletedAt).not.toBeNull();
+      });
+
+      it("keeps going past its plan while it has not met the ascending pass, and plans the extra page", async () => {
+        readByAscendingPass();
+        // Listings were added during the scan, so the last planned page still holds only unseen ones.
+        const pages: Record<number, DiscogsInventoryPage> = {
+          3: descPage(3, 10_101, 10_200),
+          4: descPage(4, 9_951, 10_050),
+        };
+        const handler = createInventoryPageHandler({ db, enqueue, getInventory: async (_u, page) => pages[page]! });
+
+        await handler(descJob(3), ctx);
+        expect(queuedPages()).toEqual([4]);
+        expect(sellerRow().scanCompletedAt).toBeNull();
+
+        enqueue.mockClear();
+        await handler(descJob(4), ctx);
+
+        // Met the ascending pass, but 100 listings are still unread, so the next sort starts.
+        expect(pageJobs().map((job) => job.payload)).toEqual([
+          { ...nextPayload, page: 1, sort: "listed", order: "asc" },
+        ]);
+        expect(sellerRow()).toMatchObject({ scanPagesTotal: 104, scanCompletedAt: null });
+        expect(passRows().find((row) => row.order === "desc")).toMatchObject({ pagesPlanned: 4 });
+      });
+
+      it("does not stop before its planned pages just because it already met the ascending pass", async () => {
+        readByAscendingPass();
+        const handler = createInventoryPageHandler({
+          db,
+          enqueue,
+          getInventory: async (_u, page) => descPage(page, 9_901, 10_000),
+        });
+
+        await handler(descJob(1), ctx);
+
+        expect(queuedPages()).toEqual([2]);
+      });
+
+      it("treats another copy of a release the ascending pass read as a new listing, not as meeting it", async () => {
+        readByAscendingPass();
+        // Release 5 has two listings: 5 (read by the ascending pass) and 90_001 (not yet read).
+        const handler = createInventoryPageHandler({
+          db,
+          enqueue,
+          getInventory: async () => inventoryPage(3, 150, [[5, 90_001]], TOTAL),
+        });
+
+        await handler(descJob(3), ctx);
+
+        expect(queuedPages()).toEqual([4]);
+      });
+
+      it("gives up on the pass at page 100 without having met the ascending pass, and moves to the next sort", async () => {
+        readByAscendingPass();
+        const handler = createInventoryPageHandler({
+          db,
+          enqueue,
+          getInventory: async () => inventoryPage(100, 150, [[1, 30_000]], TOTAL),
+        });
+
+        await handler(descJob(100), ctx);
+
+        expect(pageJobs().map((job) => job.payload)).toEqual([
+          { ...nextPayload, page: 1, sort: "listed", order: "asc" },
+        ]);
+        expect(sellerRow().scanCompletedAt).toBeNull();
+      });
     });
 
     it("moves on to the next sort when the inventory is not covered yet, skipping a descending pass with nothing to add", async () => {

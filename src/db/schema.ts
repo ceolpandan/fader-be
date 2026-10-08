@@ -106,6 +106,23 @@ export const scanPasses = sqliteTable(
   (table) => [uniqueIndex("scan_passes_run_sort_order_idx").on(table.runId, table.sort, table.order)],
 );
 
+/**
+ * The listings each pass of a run has read, so a pass can tell when it has met the walk it
+ * complements and the run can tell it has read every listing. A listing is one copy of a release:
+ * unlike `seller_inventory` this keeps several copies of the same release apart.
+ */
+export const scanListings = sqliteTable(
+  "scan_listings",
+  {
+    runId: text("run_id").notNull(),
+    sellerUsername: text("seller_username").notNull(),
+    sort: text("sort").$type<ScanSort>().notNull(),
+    order: text("order").$type<ScanOrder>().notNull(),
+    listingId: integer("listing_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.sort, table.order, table.listingId] })],
+);
+
 export type QueueJobType = "inventory_page" | "release_detail" | "seller_profile";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
