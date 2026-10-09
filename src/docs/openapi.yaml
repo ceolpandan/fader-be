@@ -79,6 +79,12 @@ paths:
           description: Comma-separated format names; keeps releases whose formats are all in the list
           schema:
             type: string
+        - name: noLinks
+          in: query
+          description: "only keeps releases with no video links; exclude leaves them out"
+          schema:
+            type: string
+            enum: [only, exclude]
         - name: yearMin
           in: query
           schema: { type: integer }
@@ -557,6 +563,12 @@ paths:
           description: Comma-separated country names, OR-matched
           schema:
             type: string
+        - name: noLinks
+          in: query
+          description: "only keeps releases with no video links; exclude leaves them out"
+          schema:
+            type: string
+            enum: [only, exclude]
         - name: yearMin
           in: query
           schema:

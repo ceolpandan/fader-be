@@ -107,6 +107,10 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   const excludeStyle = parseCommaSeparated(req.query.excludeStyle);
   const excludeFormat = parseCommaSeparated(req.query.excludeFormat);
   const country = parseCommaSeparated(req.query.country);
+  const noLinks = req.query.noLinks;
+  if (noLinks !== undefined && noLinks !== "only" && noLinks !== "exclude") {
+    return { error: "noLinks must be one of only, exclude" };
+  }
 
   const filters: SQL[] = [];
   if (genre.length > 0) filters.push(jsonArrayHasAny(releases.genres, genre));
@@ -119,6 +123,9 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   if (excludeStyle.length > 0) filters.push(jsonArrayHasNone(releases.styles, excludeStyle));
   if (excludeFormat.length > 0) filters.push(jsonFormatNameHasNone(releases.formats, excludeFormat));
   if (country.length > 0) filters.push(inArray(releases.country, country));
+  // A release has no links when it has no video links.
+  if (noLinks === "only") filters.push(sql`json_array_length(${releases.videos}) = 0`);
+  if (noLinks === "exclude") filters.push(sql`json_array_length(${releases.videos}) > 0`);
   if (yearMin.value !== undefined) filters.push(gte(releases.year, yearMin.value));
   if (yearMax.value !== undefined) filters.push(lte(releases.year, yearMax.value));
 

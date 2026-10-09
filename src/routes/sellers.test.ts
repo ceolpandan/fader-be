@@ -953,6 +953,7 @@ describe("sellers routes", () => {
         formats: { name: string; descriptions: string[] }[];
         artists: { id: number; name: string }[];
         ratingAverage: number | null;
+        videos: { uri: string; title: string }[];
       }> = {},
     ) {
       db.insert(releases)
@@ -960,6 +961,7 @@ describe("sellers routes", () => {
           id,
           title,
           ratingAverage: overrides.ratingAverage ?? null,
+          videos: overrides.videos ?? [],
           year: overrides.year ?? 2000,
           country: overrides.country ?? null,
           genres: overrides.genres ?? [],
@@ -1129,6 +1131,19 @@ describe("sellers routes", () => {
 
       const formatRes = await authedRequest(app).get("/sellers/some-seller/inventory?onlyFormat=Vinyl");
       expect(ids(formatRes)).toEqual([1]);
+    });
+
+    it("filters by noLinks: only keeps releases without video links, exclude drops them", async () => {
+      seedRelease(1, "Linked", { videos: [{ uri: "https://youtube.com/x", title: "x" }] });
+      seedRelease(2, "Bare");
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      const ids = (res: { body: { items: { releaseId: number }[] } }) => res.body.items.map((i) => i.releaseId).sort();
+
+      expect(ids(await authedRequest(app).get("/sellers/some-seller/inventory?noLinks=only"))).toEqual([2]);
+      expect(ids(await authedRequest(app).get("/sellers/some-seller/inventory?noLinks=exclude"))).toEqual([1]);
+      const bad = await authedRequest(app).get("/sellers/some-seller/inventory?noLinks=maybe");
+      expect(bad.status).toBe(400);
     });
 
     it("filters by yearMin/yearMax", async () => {
