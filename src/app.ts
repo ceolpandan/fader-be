@@ -11,7 +11,7 @@ import type { DiscogsQueue } from "./queue/discogs-queue";
 import { createFadeRouter } from "./routes/fade";
 import { mastersRouter } from "./routes/masters";
 import { createReleasesRouter } from "./routes/releases";
-import { createSellersRouter } from "./routes/sellers";
+import { createSellersRouter, type DiscogsReads } from "./routes/sellers";
 import { createSettingsRouter } from "./routes/settings";
 import { logger } from "./util/logger";
 
@@ -21,6 +21,8 @@ const openapiSpec = yaml.load(fs.readFileSync(openapiPath, "utf8")) as Record<st
 export interface AppDeps {
   db: Db;
   queue: DiscogsQueue;
+  /** Direct Discogs reads for the seller preview; defaults to the real client. */
+  discogs?: DiscogsReads;
 }
 
 export function createApp(deps: AppDeps): Express {

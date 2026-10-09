@@ -8,7 +8,9 @@ import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs, fades, releases, scanListings, scanPasses, sellerInventory, sellers } from "../db/schema";
-import { DiscogsTransientError } from "../discogs-client";
+import { DiscogsNotFoundError, DiscogsTransientError } from "../discogs-client";
+import type { DiscogsInventoryPage } from "../types/discogs-api";
+import type { DiscogsReads } from "./sellers";
 import { createSellerProfileHandler } from "../indexing/seller-profile-handler";
 import {
   DiscogsQueue,
@@ -201,6 +203,100 @@ describe("sellers routes", () => {
 
       const second = await authedRequest(app).post("/sellers/some-seller/index").send();
       expect(second.status).toBe(202);
+    });
+  });
+
+  describe("GET /sellers/:username/preview", () => {
+    const profile = {
+      username: "Some-Seller",
+      seller_rating: 98.4,
+      seller_num_ratings: 1203,
+      avatar_url: "https://img.discogs.com/avatar.jpg",
+      num_for_sale: 250,
+    };
+    const inventoryPage = { listings: [{ ships_from: "Germany" }] } as unknown as DiscogsInventoryPage;
+
+    function previewApp(discogs: DiscogsReads): Express {
+      return createApp({ db, queue, discogs });
+    }
+
+    it("describes the seller from Discogs and stores nothing", async () => {
+      const getInventory = vi.fn().mockResolvedValue(inventoryPage);
+      const app = previewApp({ getUserProfile: vi.fn().mockResolvedValue(profile), getInventory });
+
+      const res = await authedRequest(app).get("/sellers/some-seller/preview");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        username: "Some-Seller",
+        avatarUrl: "https://img.discogs.com/avatar.jpg",
+        sellerRating: 98.4,
+        sellerNumRatings: 1203,
+        shipsFromCountry: "Germany",
+        numForSale: 250,
+        marketplaceSuspended: false,
+        // 250 releases + 3 inventory pages, at PACING_MS each.
+        estimatedSeconds: Math.round((253 * PACING_MS) / 1000),
+      });
+      expect(getInventory).toHaveBeenCalledWith("Some-Seller", 1);
+      expect(db.select().from(sellers).all()).toEqual([]);
+    });
+
+    it("returns 404 when Discogs has no such user", async () => {
+      const getUserProfile = vi.fn().mockRejectedValue(new DiscogsNotFoundError("nope"));
+      const res = await authedRequest(previewApp({ getUserProfile, getInventory: vi.fn() })).get(
+        "/sellers/ghost/preview",
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 503 while Discogs is unavailable", async () => {
+      const getUserProfile = vi.fn().mockRejectedValue(new DiscogsTransientError("429"));
+      const res = await authedRequest(previewApp({ getUserProfile, getInventory: vi.fn() })).get(
+        "/sellers/some-seller/preview",
+      );
+      expect(res.status).toBe(503);
+    });
+
+    it("returns 400 for a blank username", async () => {
+      const res = await authedRequest(previewApp({ getUserProfile: vi.fn(), getInventory: vi.fn() })).get(
+        "/sellers/%20/preview",
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("leaves ships-from empty when the listing lookup fails", async () => {
+      const app = previewApp({
+        getUserProfile: vi.fn().mockResolvedValue(profile),
+        getInventory: vi.fn().mockRejectedValue(new DiscogsTransientError("boom")),
+      });
+      const res = await authedRequest(app).get("/sellers/some-seller/preview");
+      expect(res.status).toBe(200);
+      expect(res.body.shipsFromCountry).toBeNull();
+    });
+
+    it("skips the listing lookup for a seller with no listings, and reports no rating for one who never sold", async () => {
+      const getInventory = vi.fn();
+      const app = previewApp({
+        getUserProfile: vi.fn().mockResolvedValue({
+          username: "empty",
+          seller_rating: 0,
+          seller_num_ratings: 0,
+          num_for_sale: 0,
+          marketplace_suspended: true,
+        }),
+        getInventory,
+      });
+      const res = await authedRequest(app).get("/sellers/empty/preview");
+      expect(res.body).toMatchObject({
+        sellerRating: null,
+        sellerNumRatings: null,
+        avatarUrl: null,
+        numForSale: 0,
+        marketplaceSuspended: true,
+        estimatedSeconds: 0,
+      });
+      expect(getInventory).not.toHaveBeenCalled();
     });
   });
 

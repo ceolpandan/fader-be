@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, lte, or, sql, type SQL } from "drizzle-orm";
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import { and, asc, eq, or, sql, type SQL } from "drizzle-orm";
 import { Router } from "express";
 import type { Db } from "../db/client";
 import { isFadedFor, isNotFadedFor } from "../db/fades";
 import { discogsQueueJobs, releases, scanListings, scanPasses, sellerInventory, sellers } from "../db/schema";
 import type {
   IndexStartedDto,
+  SellerPreviewDto,
   SellerInventoryFacetsDto,
   SellerInventoryPageDto,
   IndexingPhase,
@@ -16,7 +16,10 @@ import type {
 } from "../dto/seller.dto";
 import { isInventoryCovered, observedItems, observedListings } from "../indexing/coverage";
 import { MAX_REACHABLE_ITEMS } from "../indexing/inventory-page-handler";
+import { DiscogsNotFoundError, DiscogsTransientError, getInventory, getUserProfile } from "../discogs-client";
+import type { DiscogsInventoryPage, DiscogsUserProfile } from "../types/discogs-api";
 import {
+  PACING_MS,
   NonRetryableError,
   QueueUnavailableError,
   QueueWaitTimeoutError,
@@ -24,6 +27,7 @@ import {
   type DiscogsQueue,
 } from "../queue/discogs-queue";
 import { logger } from "../util/logger";
+import { collectFacets, parseReleaseQuery } from "./release-query";
 
 /**
  * Inventory items the run has seen so far: distinct items since its first pass began, out of
@@ -78,78 +82,25 @@ export const ETA_WINDOW = 20;
 /** A gap this long between completed jobs was a Discogs pause, not the queue's pace. */
 const ETA_PAUSE_GAP_MS = 30_000;
 
-const SORT_FIELDS = ["title", "year", "artist", "format", "rating"] as const;
-type SortField = (typeof SORT_FIELDS)[number];
-const SORT_OPTIONS = SORT_FIELDS.flatMap((field) => [field, `-${field}`]) as string[];
+
+/** The Discogs reads a preview makes directly (not through the queue). */
+export interface DiscogsReads {
+  getUserProfile: (username: string) => Promise<DiscogsUserProfile>;
+  getInventory: (username: string, page: number) => Promise<DiscogsInventoryPage>;
+}
 
 export interface SellersRouterDeps {
   db: Db;
   queue: DiscogsQueue;
+  discogs?: DiscogsReads;
 }
 
-function parseCommaSeparated(value: unknown): string[] {
-  if (typeof value !== "string" || value.length === 0) return [];
-  return value
-    .split(",")
-    .map((v) => v.trim())
-    .filter((v) => v.length > 0);
+/** Each listing costs one release request and every 100 listings one inventory page, at PACING_MS apiece. */
+function estimateIndexingSeconds(numForSale: number): number {
+  const requests = numForSale + Math.ceil(numForSale / 100);
+  return Math.round((requests * PACING_MS) / 1000);
 }
 
-function jsonArrayHasAny(column: SQLiteColumn, values: string[]): SQL {
-  const placeholders = sql.join(
-    values.map((v) => sql`${v}`),
-    sql`, `,
-  );
-  return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value IN (${placeholders}))`;
-}
-
-function jsonFormatNameHasAny(column: SQLiteColumn, values: string[]): SQL {
-  const placeholders = sql.join(
-    values.map((v) => sql`${v}`),
-    sql`, `,
-  );
-  return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') IN (${placeholders}))`;
-}
-
-function jsonArrayHasNone(column: SQLiteColumn, values: string[]): SQL {
-  return sql`NOT ${jsonArrayHasAny(column, values)}`;
-}
-
-function jsonFormatNameHasNone(column: SQLiteColumn, values: string[]): SQL {
-  return sql`NOT ${jsonFormatNameHasAny(column, values)}`;
-}
-
-/** The array is non-empty and every value is in the list. */
-function jsonArrayOnly(column: SQLiteColumn, values: string[]): SQL {
-  const placeholders = sql.join(
-    values.map((v) => sql`${v}`),
-    sql`, `,
-  );
-  return sql`(json_array_length(${column}) > 0 AND NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE value NOT IN (${placeholders})))`;
-}
-
-function jsonFormatNameOnly(column: SQLiteColumn, values: string[]): SQL {
-  const placeholders = sql.join(
-    values.map((v) => sql`${v}`),
-    sql`, `,
-  );
-  return sql`(json_array_length(${column}) > 0 AND NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') NOT IN (${placeholders})))`;
-}
-
-function sortColumn(field: SortField) {
-  switch (field) {
-    case "title":
-      return releases.title;
-    case "year":
-      return releases.year;
-    case "artist":
-      return sql`json_extract(${releases.artists}, '$[0].name')`;
-    case "format":
-      return sql`json_extract(${releases.formats}, '$[0].name')`;
-    case "rating":
-      return releases.ratingAverage;
-  }
-}
 
 /**
  * Time left for `remaining` jobs at the pace of the last ETA_WINDOW completed ones, leaving out
@@ -168,6 +119,55 @@ function estimateEtaSeconds(doneAt: number[], remaining: number): number | null 
 
 export function createSellersRouter(deps: SellersRouterDeps): Router {
   const router = Router();
+
+  const discogs: DiscogsReads = deps.discogs ?? { getUserProfile, getInventory };
+
+  router.get("/:username/preview", async (req, res) => {
+    const typed = req.params.username.trim();
+    if (!typed) {
+      res.status(400).json({ error: "username must not be empty" });
+      return;
+    }
+
+    let profile: DiscogsUserProfile;
+    try {
+      profile = await discogs.getUserProfile(typed);
+    } catch (err) {
+      if (err instanceof DiscogsNotFoundError) {
+        res.status(404).json({ error: `No Discogs user named '${typed}'` });
+      } else if (err instanceof DiscogsTransientError) {
+        res.status(503).json({ error: "Discogs unavailable, try again" });
+      } else {
+        logger.error("Failed to preview seller with Discogs", err);
+        res.status(502).json({ error: "Failed to preview seller with Discogs" });
+      }
+      return;
+    }
+
+    const numForSale = profile.num_for_sale ?? 0;
+    let shipsFromCountry: string | null = null;
+    if (numForSale > 0) {
+      try {
+        const page = await discogs.getInventory(profile.username, 1);
+        shipsFromCountry = page.listings[0]?.ships_from ?? null;
+      } catch (err) {
+        logger.error("Could not read a listing for the seller preview", err);
+      }
+    }
+
+    const hasRatings = (profile.seller_num_ratings ?? 0) > 0;
+    const dto: SellerPreviewDto = {
+      username: profile.username,
+      avatarUrl: profile.avatar_url || null,
+      sellerRating: hasRatings ? (profile.seller_rating ?? null) : null,
+      sellerNumRatings: hasRatings ? (profile.seller_num_ratings ?? null) : null,
+      shipsFromCountry,
+      numForSale,
+      marketplaceSuspended: profile.marketplace_suspended === true,
+      estimatedSeconds: estimateIndexingSeconds(numForSale),
+    };
+    res.json(dto);
+  });
 
   router.get("/", (req, res) => {
     const { uid } = req.user!;
@@ -403,23 +403,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .where(and(eq(sellerInventory.sellerUsername, username), isNotFadedFor(uid)))
       .all();
 
-    const genres = new Set<string>();
-    const styles = new Set<string>();
-    const formats = new Set<string>();
-    const countries = new Set<string>();
-    for (const row of rows) {
-      for (const g of row.genres) genres.add(g);
-      for (const s of row.styles) styles.add(s);
-      for (const f of row.formats) formats.add(f.name);
-      if (row.country) countries.add(row.country);
-    }
-
-    const dto: SellerInventoryFacetsDto = {
-      genres: [...genres].sort(),
-      styles: [...styles].sort(),
-      formats: [...formats].sort(),
-      countries: [...countries].sort(),
-    };
+    const dto: SellerInventoryFacetsDto = collectFacets(rows);
     res.json(dto);
   });
 
@@ -427,73 +411,19 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     const { username } = req.params;
     const { uid } = req.user!;
 
-    const page = Number(req.query.page ?? 1);
-    const pageSize = Number(req.query.pageSize ?? 50);
-    if (!Number.isInteger(page) || page < 1) {
-      res.status(400).json({ error: "page must be a positive integer" });
+    const parsed = parseReleaseQuery(req);
+    if ("error" in parsed) {
+      res.status(400).json({ error: parsed.error });
       return;
     }
-    if (!Number.isInteger(pageSize) || pageSize < 1) {
-      res.status(400).json({ error: "pageSize must be a positive integer" });
-      return;
-    }
+    const { page, pageSize, filters, orderBy } = parsed.query;
 
-    const genreFilter = parseCommaSeparated(req.query.genre);
-    const styleFilter = parseCommaSeparated(req.query.style);
-    const formatFilter = parseCommaSeparated(req.query.format);
-    const onlyGenreFilter = parseCommaSeparated(req.query.onlyGenre);
-    const onlyStyleFilter = parseCommaSeparated(req.query.onlyStyle);
-    const onlyFormatFilter = parseCommaSeparated(req.query.onlyFormat);
-    const excludeGenreFilter =parseCommaSeparated(req.query.excludeGenre);
-    const excludeStyleFilter = parseCommaSeparated(req.query.excludeStyle);
-    const excludeFormatFilter = parseCommaSeparated(req.query.excludeFormat);
-    const countryFilter = parseCommaSeparated(req.query.country);
-
-    let yearMin: number | undefined;
-    if (req.query.yearMin !== undefined) {
-      yearMin = Number(req.query.yearMin);
-      if (!Number.isInteger(yearMin)) {
-        res.status(400).json({ error: "yearMin must be an integer" });
-        return;
-      }
-    }
-    let yearMax: number | undefined;
-    if (req.query.yearMax !== undefined) {
-      yearMax = Number(req.query.yearMax);
-      if (!Number.isInteger(yearMax)) {
-        res.status(400).json({ error: "yearMax must be an integer" });
-        return;
-      }
-    }
-
-    const sortParam = (req.query.sort as string | undefined) ?? "title";
-    if (!SORT_OPTIONS.includes(sortParam)) {
-      res.status(400).json({ error: `sort must be one of ${SORT_OPTIONS.join(", ")}` });
-      return;
-    }
-    const isDescending = sortParam.startsWith("-");
-    const sortField = (isDescending ? sortParam.slice(1) : sortParam) as SortField;
-
-    const forSaleConditions = [
+    const whereClause = and(
       eq(sellerInventory.sellerUsername, username),
       eq(sellerInventory.status, "active"),
-    ];
-    const conditions = [...forSaleConditions, isNotFadedFor(uid)];
-    if (genreFilter.length > 0) conditions.push(jsonArrayHasAny(releases.genres, genreFilter));
-    if (styleFilter.length > 0) conditions.push(jsonArrayHasAny(releases.styles, styleFilter));
-    if (formatFilter.length > 0) conditions.push(jsonFormatNameHasAny(releases.formats, formatFilter));
-    if (onlyGenreFilter.length > 0) conditions.push(jsonArrayOnly(releases.genres, onlyGenreFilter));
-    if (onlyStyleFilter.length > 0) conditions.push(jsonArrayOnly(releases.styles, onlyStyleFilter));
-    if (onlyFormatFilter.length > 0) conditions.push(jsonFormatNameOnly(releases.formats, onlyFormatFilter));
-    if (excludeGenreFilter.length > 0) conditions.push(jsonArrayHasNone(releases.genres, excludeGenreFilter));
-    if (excludeStyleFilter.length > 0) conditions.push(jsonArrayHasNone(releases.styles, excludeStyleFilter));
-    if (excludeFormatFilter.length > 0) {
-      conditions.push(jsonFormatNameHasNone(releases.formats, excludeFormatFilter));
-    }
-    if (countryFilter.length > 0) conditions.push(inArray(releases.country, countryFilter));
-    if (yearMin !== undefined) conditions.push(gte(releases.year, yearMin));
-    if (yearMax !== undefined) conditions.push(lte(releases.year, yearMax));
-    const whereClause = and(...conditions);
+      isNotFadedFor(uid),
+      ...filters,
+    );
 
     const total = deps.db
       .select({ count: sql<number>`count(*)` })
@@ -504,11 +434,6 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
 
     const forSaleCount = countForSale(deps.db, username);
     const fadedCount = countForSale(deps.db, username, isFadedFor(uid));
-
-    const orderExpr = sortColumn(sortField);
-    const orderBy = isDescending ? desc(orderExpr) : asc(orderExpr);
-    // Unrated releases are noise at either end of a rating sort, so they always go last.
-    const nullsLast = sortField === "rating" ? [sql`${orderExpr} IS NULL`] : [];
 
     const rows = deps.db
       .select({
@@ -532,7 +457,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .from(sellerInventory)
       .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
       .where(whereClause)
-      .orderBy(...nullsLast, orderBy, sellerInventory.releaseId)
+      .orderBy(...orderBy)
       .limit(pageSize)
       .offset((page - 1) * pageSize)
       .all();
