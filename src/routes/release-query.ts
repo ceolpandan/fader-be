@@ -137,9 +137,18 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   return { query: { page, pageSize, filters, orderBy } };
 }
 
-/** Distinct genres, styles, format names and countries of the given release rows, sorted. */
+/** The `genre` query param of a facets request: the genres that narrow the offered styles. */
+export function parseFacetGenres(req: Request): string[] {
+  return parseCommaSeparated(req.query.genre);
+}
+
+/**
+ * Distinct genres, styles, format names and countries of the given release rows, sorted. With
+ * `styleGenres`, styles come only from releases that have one of those genres.
+ */
 export function collectFacets(
   rows: { genres: string[]; styles: string[]; formats: { name: string }[]; country: string | null }[],
+  styleGenres: string[] = [],
 ) {
   const genres = new Set<string>();
   const styles = new Set<string>();
@@ -147,7 +156,9 @@ export function collectFacets(
   const countries = new Set<string>();
   for (const row of rows) {
     for (const g of row.genres) genres.add(g);
-    for (const s of row.styles) styles.add(s);
+    if (styleGenres.length === 0 || row.genres.some((g) => styleGenres.includes(g))) {
+      for (const s of row.styles) styles.add(s);
+    }
     for (const f of row.formats) formats.add(f.name);
     if (row.country) countries.add(row.country);
   }

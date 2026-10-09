@@ -13,7 +13,7 @@ import {
   type DiscogsQueue,
 } from "../queue/discogs-queue";
 import { logger } from "../util/logger";
-import { collectFacets, parseReleaseQuery } from "./release-query";
+import { collectFacets, parseFacetGenres, parseReleaseQuery } from "./release-query";
 
 export interface ReleasesRouterDeps {
   db: Db;
@@ -80,7 +80,7 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       .from(releases)
       .where(isNotFadedFor(req.user!.uid))
       .all();
-    const dto: SellerInventoryFacetsDto = collectFacets(rows);
+    const dto: SellerInventoryFacetsDto = collectFacets(rows, parseFacetGenres(req));
     res.json(dto);
   });
 

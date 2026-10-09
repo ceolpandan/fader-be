@@ -116,7 +116,17 @@ paths:
       operationId: getReleaseFacets
       summary: >
         Distinct genres, styles, format names and countries across all enriched
-        releases (faded ones excluded; not affected by any filters).
+        releases (faded ones excluded; not affected by any filters, except that
+        `genre` narrows the styles).
+      parameters:
+        - name: genre
+          in: query
+          required: false
+          description: >
+            Comma-separated genre names; styles are then taken only from
+            releases that have one of these genres.
+          schema:
+            type: string
       responses:
         "200":
           description: Facets
@@ -614,11 +624,20 @@ paths:
       summary: >
         Distinct genres, styles, format names, and countries present across a
         seller's full inventory (all statuses, faded items excluded; not
-        affected by any inventory filters).
+        affected by any inventory filters, except that `genre` narrows the
+        styles).
       parameters:
         - name: username
           in: path
           required: true
+          schema:
+            type: string
+        - name: genre
+          in: query
+          required: false
+          description: >
+            Comma-separated genre names; styles are then taken only from
+            releases that have one of these genres.
           schema:
             type: string
       responses:

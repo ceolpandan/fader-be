@@ -27,7 +27,7 @@ import {
   type DiscogsQueue,
 } from "../queue/discogs-queue";
 import { logger } from "../util/logger";
-import { collectFacets, parseReleaseQuery } from "./release-query";
+import { collectFacets, parseFacetGenres, parseReleaseQuery } from "./release-query";
 
 /**
  * Inventory items the run has seen so far: distinct items since its first pass began, out of
@@ -403,7 +403,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .where(and(eq(sellerInventory.sellerUsername, username), isNotFadedFor(uid)))
       .all();
 
-    const dto: SellerInventoryFacetsDto = collectFacets(rows);
+    const dto: SellerInventoryFacetsDto = collectFacets(rows, parseFacetGenres(req));
     res.json(dto);
   });
 
