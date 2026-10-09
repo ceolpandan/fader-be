@@ -42,6 +42,7 @@ describe("GET /releases and /releases/facets", () => {
       artists: { id: number; name: string }[];
       ratingAverage: number | null;
       masterId: number | null;
+      videos: { uri: string; title: string }[];
     }> = {},
   ) {
     db.insert(releases)
@@ -49,6 +50,7 @@ describe("GET /releases and /releases/facets", () => {
         id,
         title,
         ratingAverage: overrides.ratingAverage ?? null,
+        videos: overrides.videos ?? [],
         year: overrides.year ?? 2000,
         country: overrides.country ?? null,
         genres: overrides.genres ?? [],
@@ -124,6 +126,15 @@ describe("GET /releases and /releases/facets", () => {
       const res = await get("/releases");
       expect(titles(res.body)).toEqual(["Listed", "Orphan"]);
       expect(res.body.total).toBe(2);
+    });
+
+    it("filters by noLinks: only keeps releases without video links, exclude drops them", async () => {
+      seedRelease(1, "Linked", { videos: [{ uri: "https://youtube.com/x", title: "x" }] });
+      seedRelease(2, "Bare");
+
+      expect(titles((await get("/releases?noLinks=only")).body)).toEqual(["Bare"]);
+      expect(titles((await get("/releases?noLinks=exclude")).body)).toEqual(["Linked"]);
+      expect((await get("/releases?noLinks=maybe")).status).toBe(400);
     });
 
     it("filters like the seller inventory", async () => {
