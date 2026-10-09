@@ -12,6 +12,112 @@ info:
     via a Discogs-rate-limited background queue, and browse/filter/sort the
     resulting inventory.
 paths:
+  /releases:
+    get:
+      operationId: listReleases
+      summary: List every enriched release, whatever seller has it (or had it)
+      description: >
+        Takes the same paging, filter and sort query parameters as
+        GET /sellers/{username}/inventory, with the same defaults and the same
+        400 on invalid input. Releases no seller currently lists are included.
+        Releases the user has faded (directly or through their master) are
+        left out of items and total.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: genre
+          in: query
+          description: Comma-separated genre names, OR-matched
+          schema:
+            type: string
+        - name: style
+          in: query
+          description: Comma-separated style names, OR-matched
+          schema:
+            type: string
+        - name: format
+          in: query
+          description: Comma-separated format names (e.g. Vinyl, CD), OR-matched
+          schema:
+            type: string
+        - name: country
+          in: query
+          description: Comma-separated country names, OR-matched
+          schema:
+            type: string
+        - name: excludeGenre
+          in: query
+          description: Comma-separated genre names; releases with any of them are left out
+          schema:
+            type: string
+        - name: excludeStyle
+          in: query
+          description: Comma-separated style names; releases with any of them are left out
+          schema:
+            type: string
+        - name: excludeFormat
+          in: query
+          description: Comma-separated format names; releases with any of them are left out
+          schema:
+            type: string
+        - name: onlyGenre
+          in: query
+          description: Comma-separated genre names; keeps releases whose genres are all in the list
+          schema:
+            type: string
+        - name: onlyStyle
+          in: query
+          description: Comma-separated style names; keeps releases whose styles are all in the list
+          schema:
+            type: string
+        - name: onlyFormat
+          in: query
+          description: Comma-separated format names; keeps releases whose formats are all in the list
+          schema:
+            type: string
+        - name: yearMin
+          in: query
+          schema: { type: integer }
+        - name: yearMax
+          in: query
+          schema: { type: integer }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum:
+              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating]
+            default: title
+      responses:
+        "200":
+          description: Paginated releases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseListPageDto"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /releases/facets:
+    get:
+      operationId: getReleaseFacets
+      summary: >
+        Distinct genres, styles, format names and countries across all enriched
+        releases (faded ones excluded; not affected by any filters).
+      responses:
+        "200":
+          description: Facets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerInventoryFacetsDto"
   /releases/{id}:
     get:
       operationId: getRelease
@@ -238,6 +344,50 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SellerSummaryDto"
+  /sellers/{username}/preview:
+    get:
+      operationId: previewSeller
+      summary: >
+        What Discogs says about a seller before it is indexed: profile, rating,
+        where it ships from, listing count and a rough indexing time. Reads
+        Discogs only; nothing is stored.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Seller preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerPreviewDto"
+        "400":
+          description: The username is empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Discogs has no user with this name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Discogs failed while checking the user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is unavailable (rate limit or server error)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /sellers/{username}/index:
     post:
       operationId: startSellerIndexing
@@ -483,6 +633,41 @@ components:
         username: { type: string }
         runId: { type: string }
 
+    SellerPreviewDto:
+      type: object
+      required:
+        [
+          username,
+          avatarUrl,
+          sellerRating,
+          sellerNumRatings,
+          shipsFromCountry,
+          numForSale,
+          marketplaceSuspended,
+          estimatedSeconds,
+        ]
+      properties:
+        username:
+          type: string
+          description: Under the casing Discogs reports.
+        avatarUrl: { type: string, nullable: true }
+        sellerRating:
+          type: number
+          nullable: true
+          description: Seller rating as a percentage, e.g. 96.4; null for a seller who has never sold.
+        sellerNumRatings: { type: integer, nullable: true }
+        shipsFromCountry:
+          type: string
+          nullable: true
+          description: From the seller's first listing; null when there is none or Discogs could not be asked.
+        numForSale:
+          type: integer
+          description: Listings Discogs reports for the seller.
+        marketplaceSuspended: { type: boolean }
+        estimatedSeconds:
+          type: integer
+          description: Rough time a full indexing run takes at the Discogs request pace.
+
     SellerSummaryDto:
       type: object
       required: [username, lastIndexedAt, lastIndexStatus, forSaleCount, fadedCount, coverage]
@@ -706,6 +891,56 @@ components:
         fadedCount:
           type: integer
           description: How many of forSaleCount are faded for the user. Ignores filters.
+
+    ReleaseListItemDto:
+      type: object
+      description: A SellerInventoryItemDto without the seller-specific status, firstSeenAt and soldAt.
+      required:
+        [releaseId, title, thumb, year, country, genres, styles, formats, ratingAverage, ratingCount, haves, wants, artists]
+      properties:
+        releaseId: { type: integer }
+        title: { type: string }
+        thumb: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        country: { type: string, nullable: true }
+        genres:
+          type: array
+          items: { type: string }
+        styles:
+          type: array
+          items: { type: string }
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseFormatDto"
+        ratingAverage: { type: number, nullable: true }
+        ratingCount: { type: integer, nullable: true }
+        haves: { type: integer, nullable: true }
+        wants: { type: integer, nullable: true }
+        artists:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseArtistDto"
+
+    ReleaseListPageDto:
+      type: object
+      required: [items, page, pageSize, total, enrichedCount, fadedCount]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseListItemDto"
+        page: { type: integer }
+        pageSize: { type: integer }
+        total:
+          type: integer
+          description: Releases matching the current filters, faded ones excluded.
+        enrichedCount:
+          type: integer
+          description: All enriched releases, faded ones included. Ignores filters.
+        fadedCount:
+          type: integer
+          description: How many of enrichedCount are faded for the user. Ignores filters.
 
     SellerInventoryFacetsDto:
       type: object

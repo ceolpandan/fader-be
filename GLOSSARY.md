@@ -25,7 +25,7 @@ One copy of a release that a seller has for sale, with its own media condition a
 _Avoid_: Copy, offer
 
 **Enriched release**:
-A release whose details we have fetched from Discogs and stored. Only enriched releases appear when browsing a seller's inventory.
+A release whose details we have fetched from Discogs and stored. Only enriched releases appear when browsing, whether through a seller's inventory or across all sellers.
 _Avoid_: Synced release, cached release
 
 **Release detail**:
@@ -41,6 +41,10 @@ _Avoid_: Audio link, media link
 **Indexing**:
 Fetching a seller's whole inventory and enriching each release we don't have yet. Running it again for the same seller is a reindex.
 _Avoid_: Crawl, scrape, sync
+
+**Seller preview**:
+What Discogs says about a seller before we index them: avatar, rating, where they ship from, how many listings they have and a rough indexing time. Read live from Discogs and stored nowhere, so previewing never creates a seller.
+_Avoid_: Lookup, validation, dry run
 
 **Remove** (a seller):
 Delete a seller and what hangs off it (inventory links, scan passes, queued jobs), stopping any run in progress. Releases stay, because other sellers share them, and so do fades. It is also how a collector cancels indexing. A remove is never a fade.

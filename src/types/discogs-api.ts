@@ -155,6 +155,9 @@ export interface DiscogsUserProfile {
   /** Percentage, e.g. 96.4. Zero for users who have never sold. */
   seller_rating?: number;
   seller_num_ratings?: number;
+  avatar_url?: string;
+  num_for_sale?: number;
+  marketplace_suspended?: boolean;
 }
 
 export interface DiscogsInventoryPagination {

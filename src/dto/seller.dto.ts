@@ -13,6 +13,23 @@ export interface IndexStartedDto {
   runId: string;
 }
 
+/** What Discogs says about a Seller we may not have indexed yet; nothing is stored. */
+export interface SellerPreviewDto {
+  /** Under the casing Discogs reports. */
+  username: string;
+  avatarUrl: string | null;
+  /** Seller rating as a percentage, e.g. 96.4; null for a Seller who has never sold. */
+  sellerRating: number | null;
+  sellerNumRatings: number | null;
+  /** From the first listing; null when the Seller has none or Discogs could not be asked. */
+  shipsFromCountry: string | null;
+  /** Listings Discogs reports for the Seller. */
+  numForSale: number;
+  marketplaceSuspended: boolean;
+  /** Rough time a full indexing run takes at the Discogs request pace. */
+  estimatedSeconds: number;
+}
+
 export interface SellerSummaryDto {
   username: string;
   lastIndexedAt: string | null;
@@ -108,4 +125,19 @@ export interface SellerInventoryFacetsDto {
   styles: string[];
   formats: string[];
   countries: string[];
+}
+
+/** A row of `GET /releases`: a seller inventory item without the seller-specific fields. */
+export type ReleaseListItemDto = Omit<SellerInventoryItemDto, "status" | "firstSeenAt" | "soldAt">;
+
+export interface ReleaseListPageDto {
+  items: ReleaseListItemDto[];
+  page: number;
+  pageSize: number;
+  /** Releases matching the current filters (faded ones already excluded). */
+  total: number;
+  /** All enriched releases, faded ones included. Ignores filters. */
+  enrichedCount: number;
+  /** How many of `enrichedCount` are faded for the signed-in user. Ignores filters. */
+  fadedCount: number;
 }
