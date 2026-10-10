@@ -94,6 +94,10 @@ _Avoid_: Priority job, foreground job
 Hiding a release a collector isn't interested in, together with its master and every other version under that master. Fades belong to the collector who made them. The extension dims faded releases on Discogs pages.
 _Avoid_: Block, hide, ignore
 
+**Unfade**:
+Remove a fade, which brings back the release, its master and every other version under that master. A fade is stored per master (or per release without one), so unfading any version unfades them all.
+_Avoid_: Restore, unhide
+
 ## Who uses it
 
 **Collector**:

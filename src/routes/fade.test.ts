@@ -29,6 +29,7 @@ function asUser(app: Express, uid: string) {
   return {
     get: (url: string) => agent.get(url).set(auth),
     post: (url: string) => agent.post(url).set(auth),
+    delete: (url: string) => agent.delete(url).set(auth),
   };
 }
 
@@ -41,19 +42,24 @@ describe("fade", () => {
   function seedRelease(
     id: number,
     masterId: number | null,
-    overrides: Partial<{ genres: string[]; styles: string[] }> = {},
+    overrides: Partial<{
+      genres: string[];
+      styles: string[];
+      title: string;
+      artists: string[];
+    }> = {},
   ) {
     db.insert(releases)
       .values({
         id,
-        title: `Release ${id}`,
+        title: overrides.title ?? `Release ${id}`,
         masterId,
         year: 2000,
         genres: overrides.genres ?? [],
         styles: overrides.styles ?? [],
         formats: [],
         labelIds: [],
-        artists: [],
+        artists: (overrides.artists ?? []).map((name, i) => ({ id: i + 1, name })),
       })
       .run();
   }
@@ -159,6 +165,122 @@ describe("fade", () => {
       expect(res.status).toBe(200);
       expect(res.headers["cache-control"]).toBe("no-store");
       expect(res.body).toEqual({ masterIds: [900], releaseIds: [555] });
+    });
+  });
+
+  describe("DELETE /fade", () => {
+    it("unfades a master, and every version with it", async () => {
+      seedRelease(111, 900);
+      seedRelease(112, 900);
+      await asUser(app, "u1").post("/fade").send({ releaseId: 111 });
+
+      const res = await asUser(app, "u1").delete("/fade").send({ masterId: 900 });
+
+      expect(res.status).toBe(204);
+      expect(db.select().from(fades).all()).toEqual([]);
+    });
+
+    it("resolves a release to its master like fade does", async () => {
+      seedRelease(111, 900);
+      await asUser(app, "u1").post("/fade").send({ releaseId: 111 });
+
+      const res = await asUser(app, "u1").delete("/fade").send({ releaseId: 111 });
+
+      expect(res.status).toBe(204);
+      expect(db.select().from(fades).all()).toEqual([]);
+    });
+
+    it("unfades a release without a master, even one that is no longer indexed", async () => {
+      seedRelease(555, null);
+      await asUser(app, "u1").post("/fade").send({ releaseId: 555 });
+      db.delete(releases).run();
+
+      await asUser(app, "u1").delete("/fade").send({ releaseId: 555 });
+
+      expect(db.select().from(fades).all()).toEqual([]);
+    });
+
+    it("leaves other collectors' fades alone and is idempotent", async () => {
+      await asUser(app, "u2").post("/fade").send({ masterId: 900 });
+
+      const first = await asUser(app, "u1").delete("/fade").send({ masterId: 900 });
+      const second = await asUser(app, "u1").delete("/fade").send({ masterId: 900 });
+
+      expect(first.status).toBe(204);
+      expect(second.status).toBe(204);
+      expect(db.select().from(fades).all()).toMatchObject([{ uid: "u2", id: 900 }]);
+    });
+
+    it("returns 400 unless exactly one valid id is given", async () => {
+      const user = asUser(app, "u1");
+
+      expect((await user.delete("/fade").send({})).status).toBe(400);
+      expect((await user.delete("/fade").send({ releaseId: 1, masterId: 2 })).status).toBe(400);
+    });
+  });
+
+  describe("GET /fade/items", () => {
+    function fadeAt(uid: string, kind: "master" | "release", id: number, at: number) {
+      db.insert(fades).values({ uid, kind, id, createdAt: new Date(at) }).run();
+    }
+
+    beforeEach(() => {
+      seedRelease(111, 900, { title: "Alpha", artists: ["Aphex Twin"] });
+      seedRelease(112, 900, { title: "Alpha (Remaster)", artists: ["Aphex Twin"] });
+      seedRelease(555, null, { title: "Beta", artists: ["Boards of Canada"] });
+      fadeAt("u1", "master", 900, 1000);
+      fadeAt("u1", "release", 555, 2000);
+      fadeAt("u1", "master", 777, 3000);
+      fadeAt("u2", "master", 900, 4000);
+    });
+
+    it("lists the signed-in user's fades newest first with a representative release", async () => {
+      const res = await asUser(app, "u1").get("/fade/items");
+
+      expect(res.status).toBe(200);
+      expect(res.headers["cache-control"]).toBe("no-store");
+      expect(res.body).toMatchObject({ page: 1, pageSize: 50, total: 3, fadedTotal: 3 });
+      expect(res.body.items).toEqual([
+        {
+          kind: "master",
+          id: 777,
+          fadedAt: new Date(3000).toISOString(),
+          title: null,
+          artists: [],
+          year: null,
+          thumb: null,
+          versionsIndexed: 0,
+        },
+        expect.objectContaining({ kind: "release", id: 555, title: "Beta", versionsIndexed: 1 }),
+        expect.objectContaining({
+          kind: "master",
+          id: 900,
+          title: "Alpha",
+          artists: [{ id: 1, name: "Aphex Twin" }],
+          versionsIndexed: 2,
+        }),
+      ]);
+    });
+
+    it("searches title and artist across every version, keeping fadedTotal unfiltered", async () => {
+      const byTitle = await asUser(app, "u1").get("/fade/items?q=remaster");
+      const byArtist = await asUser(app, "u1").get("/fade/items?q=BOARDS");
+
+      expect(byTitle.body.items.map((i: { id: number }) => i.id)).toEqual([900]);
+      expect(byTitle.body).toMatchObject({ total: 1, fadedTotal: 3 });
+      expect(byArtist.body.items.map((i: { id: number }) => i.id)).toEqual([555]);
+    });
+
+    it("paginates", async () => {
+      const res = await asUser(app, "u1").get("/fade/items?page=2&pageSize=2");
+
+      expect(res.body).toMatchObject({ page: 2, pageSize: 2, total: 3 });
+      expect(res.body.items.map((i: { id: number }) => i.id)).toEqual([900]);
+    });
+
+    it("returns 400 for a bad page or pageSize", async () => {
+      expect((await asUser(app, "u1").get("/fade/items?page=0")).status).toBe(400);
+      expect((await asUser(app, "u1").get("/fade/items?pageSize=x")).status).toBe(400);
     });
   });
 

@@ -290,6 +290,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+    delete:
+      operationId: unfade
+      summary: >
+        Unfade a release or a master for the signed-in user. A release with a
+        master unfades that master and every version under it. Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FadeRequestDto"
+      responses:
+        "204":
+          description: Fade removed, or there was none
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /fade/items:
+    get:
+      operationId: getFadedItems
+      summary: Page through what the signed-in user has faded
+      description: >
+        One row per stored fade (a master, or a release without a master),
+        newest first, each with the lowest-id indexed release it hides.
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: >
+            Case-insensitive substring of a title or artist name of any indexed
+            release the fade hides.
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: pageSize
+          schema: { type: integer, minimum: 1, default: 50 }
+      responses:
+        "200":
+          description: A page of fades
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FadedItemsDto"
+        "400":
+          description: Invalid page or pageSize
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /settings:
     get:
       operationId: getSettings
@@ -1236,6 +1289,52 @@ components:
         theme:
           type: string
           enum: [light, dark]
+
+    FadedItemDto:
+      type: object
+      required: [kind, id, fadedAt, title, artists, year, thumb, versionsIndexed]
+      properties:
+        kind:
+          type: string
+          enum: [master, release]
+        id:
+          type: integer
+          description: The master id or release id, as stored; send it back to unfade.
+        fadedAt:
+          type: string
+          format: date-time
+        title:
+          type: string
+          nullable: true
+          description: Of the lowest-id indexed release the fade hides; null if none is indexed.
+        artists:
+          type: array
+          items: { $ref: "#/components/schemas/ReleaseArtistStub" }
+        year:
+          type: integer
+          nullable: true
+        thumb:
+          type: string
+          nullable: true
+        versionsIndexed:
+          type: integer
+          description: Indexed releases the fade hides; 0 when none is indexed.
+
+    FadedItemsDto:
+      type: object
+      required: [items, page, pageSize, total, fadedTotal]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FadedItemDto" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total:
+          type: integer
+          description: Fades matching the search.
+        fadedTotal:
+          type: integer
+          description: All of the collector's fades, ignoring the search.
 
     FadedIdsDto:
       type: object
