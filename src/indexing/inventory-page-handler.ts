@@ -1,4 +1,5 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, not, sql } from "drizzle-orm";
+import { isCoveredByFadeFor } from "../db/fades";
 import type { Db } from "../db/client";
 import {
   discogsQueueJobs,
@@ -130,6 +131,7 @@ function enqueueNewReleases(
   username: string,
   runId: string,
   runStartedAt: Date,
+  uid?: string,
 ): number {
   const queued = new Set(
     deps.db
@@ -148,6 +150,9 @@ function enqueueNewReleases(
         eq(sellerInventory.sellerUsername, username),
         gte(sellerInventory.lastSeenAt, runStartedAt),
         sql`${sellerInventory.releaseId} NOT IN (SELECT ${releases.id} FROM ${releases})`,
+        // Releases the starting collector faded aren't worth enriching for them. A skipped release
+        // gets no row, so another collector's run still enriches it.
+        uid ? not(isCoveredByFadeFor(uid, sellerInventory.releaseId)) : undefined,
       ),
     )
     .all()
@@ -203,7 +208,7 @@ export function createInventoryPageHandler(
      */
     const endPass = (status: ScanPassStatus): void => {
       deps.db.update(scanPasses).set({ status, endedAt: new Date() }).where(passKey).run();
-      const toEnrich = enqueueNewReleases(deps, username, context.runId, runStart);
+      const toEnrich = enqueueNewReleases(deps, username, context.runId, runStart, payload.uid);
       logger.info(
         `Pass ${sort} ${order} for ${username} ${status} (run ${context.runId}): ${toEnrich} release(s) to enrich`,
       );
@@ -220,7 +225,7 @@ export function createInventoryPageHandler(
       deps.enqueue({
         runId: context.runId,
         type: "inventory_page",
-        payload: { username, page: 1, runStartedAt, sort: next.sort, order: next.order },
+        payload: { username, page: 1, runStartedAt, sort: next.sort, order: next.order, uid: payload.uid },
         priority: SCAN_PRIORITY,
       });
     };
@@ -404,7 +409,7 @@ export function createInventoryPageHandler(
       deps.enqueue({
         runId: context.runId,
         type: "inventory_page",
-        payload: { username, page: page + 1, runStartedAt, sort, order },
+        payload: { username, page: page + 1, runStartedAt, sort, order, uid: payload.uid },
         priority: SCAN_PRIORITY,
       });
       return;

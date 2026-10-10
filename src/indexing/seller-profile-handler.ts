@@ -54,7 +54,7 @@ export function createSellerProfileHandler(
       deps.enqueue({
         runId: context.runId,
         type: "inventory_page",
-        payload: { username, page: 1, runStartedAt },
+        payload: { username, page: 1, runStartedAt, uid: payload.uid },
         priority: SCAN_PRIORITY,
       });
     });

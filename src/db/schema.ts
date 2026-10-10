@@ -143,7 +143,7 @@ export const scanListings = sqliteTable(
   (table) => [primaryKey({ columns: [table.runId, table.sort, table.order, table.listingId] })],
 );
 
-export type QueueJobType = "inventory_page" | "release_detail" | "seller_profile";
+export type QueueJobType = "inventory_page" | "release_detail" | "seller_profile" | "fade_lookup";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
 export interface InventoryPagePayload {
@@ -155,6 +155,8 @@ export interface InventoryPagePayload {
   /** Sort of the pass this page belongs to; jobs queued before multi-pass scanning omit it. */
   sort?: ScanSort;
   order?: ScanOrder;
+  /** The collector who started the scan; releases they faded are not enriched. Jobs queued before this existed omit it. */
+  uid?: string;
 }
 
 export interface ReleaseDetailPayload {
@@ -164,12 +166,22 @@ export interface ReleaseDetailPayload {
 /** Checks a typed username against Discogs; on success the handler creates the Seller and starts its run. */
 export interface SellerProfilePayload {
   username: string;
+  /** The collector who started the run, carried on to its scan jobs. */
+  uid?: string;
+}
+
+/** Resolves a fade against Discogs: a release fade finds its master, a master fade fetches its versions. */
+export interface FadeLookupPayload {
+  uid: string;
+  kind: FadeKind;
+  id: number;
 }
 
 export interface QueueJobPayloadMap {
   inventory_page: InventoryPagePayload;
   release_detail: ReleaseDetailPayload;
   seller_profile: SellerProfilePayload;
+  fade_lookup: FadeLookupPayload;
 }
 
 export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
@@ -177,7 +189,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
-    .$type<InventoryPagePayload | ReleaseDetailPayload | SellerProfilePayload>()
+    .$type<InventoryPagePayload | ReleaseDetailPayload | SellerProfilePayload | FadeLookupPayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
   priority: integer("priority").notNull().default(0),
@@ -208,6 +220,26 @@ export const fades = sqliteTable(
     kind: text("kind").$type<FadeKind>().notNull(),
     id: integer("id").notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    lookupStatus: text("lookup_status").$type<FadeLookupStatus>().notNull().default("done"),
   },
   (table) => [primaryKey({ columns: [table.uid, table.kind, table.id] })],
+);
+
+/**
+ * Where a fade stands with Discogs: `pending` until its master and versions are known, `done`
+ * once they are, `failed` when Discogs can't resolve it (the fade stays; fading again retries).
+ */
+export type FadeLookupStatus = "pending" | "done" | "failed";
+
+/** The release ids under a master, as Discogs lists them. Shared by every collector. */
+export const masterVersions = sqliteTable(
+  "master_versions",
+  {
+    masterId: integer("master_id").notNull(),
+    releaseId: integer("release_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.masterId, table.releaseId] }),
+    index("master_versions_release_idx").on(table.releaseId),
+  ],
 );

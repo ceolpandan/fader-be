@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, releases, scanListings, scanPasses, sellerInventory, sellerListings, sellers } from "../db/schema";
+import { discogsQueueJobs, fades, masterVersions, releases, scanListings, scanPasses, sellerInventory, sellerListings, sellers } from "../db/schema";
 import { DiscogsAuthError, DiscogsNotFoundError, DiscogsPaginationCapError } from "../discogs-client";
 import type { DiscogsInventoryPage, DiscogsUserProfile } from "../types/discogs-api";
 import { createInventoryPageHandler, SCAN_PASSES } from "./inventory-page-handler";
@@ -273,6 +273,59 @@ describe("inventory_page handler", () => {
     const [row] = db.select().from(sellerInventory).where(eq(sellerInventory.releaseId, 732194)).all();
     expect(row!.status).toBe("active");
     expect(sellerRow().scanCompletedAt).not.toBeNull();
+  });
+
+  describe("collector fades", () => {
+    const scan = async (uid?: string) => {
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: async () => inventoryPage(1, 1, [1, 2, 3, 4], 4),
+      });
+      await handler(
+        { username: "some-seller", page: 1, runStartedAt: RUN_STARTED, ...(uid ? { uid } : {}) },
+        ctx,
+      );
+    };
+    const enriched = () => detailJobs().map((job) => (job.payload as { releaseId: number }).releaseId);
+
+    beforeEach(() => {
+      const faded = (uid: string, kind: "master" | "release", id: number) =>
+        db.insert(fades).values({ uid, kind, id, createdAt: new Date() }).run();
+      faded("u1", "release", 1);
+      faded("u1", "master", 900);
+      faded("u2", "release", 4);
+      db.insert(masterVersions).values({ masterId: 900, releaseId: 2 }).run();
+    });
+
+    it("skips unknown releases the starting collector faded directly or through a master's versions", async () => {
+      await scan("u1");
+
+      expect(enriched()).toEqual([3, 4]);
+    });
+
+    it("skips only what the starting collector faded, so another collector's scan still enriches it", async () => {
+      await scan("u2");
+
+      expect(enriched()).toEqual([1, 2, 3]);
+    });
+
+    it("enriches everything when the job carries no collector", async () => {
+      await scan();
+
+      expect(enriched()).toEqual([1, 2, 3, 4]);
+    });
+
+    it("passes the collector on to the next page", async () => {
+      const handler = createInventoryPageHandler({
+        db,
+        enqueue,
+        getInventory: async () => inventoryPage(1, 2, [1], 200),
+      });
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED, uid: "u1" }, ctx);
+
+      expect(pageJobs()[0]!.payload).toMatchObject({ page: 2, uid: "u1" });
+    });
   });
 
   it("ignores listings from earlier runs that this run did not see", async () => {
