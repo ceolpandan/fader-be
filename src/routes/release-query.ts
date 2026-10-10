@@ -3,7 +3,7 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Request } from "express";
 import { releases, sellerListings } from "../db/schema";
 
-const SORT_FIELDS = ["title", "year", "artist", "format", "rating"] as const;
+const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
 const SORT_OPTIONS = SORT_FIELDS.flatMap((field) => [field, `-${field}`]) as string[];
 
@@ -47,6 +47,18 @@ function jsonFormatNameOnly(column: SQLiteColumn, values: string[]): SQL {
   return sql`(json_array_length(${column}) > 0 AND NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') NOT IN (${inList(values)})))`;
 }
 
+const TRACK_COUNT_OPTIONS = ["1", "2", "3", "4", "5", "6", "7+"];
+
+/** The tracklist length is one of the counts; "7+" stands for seven or more. */
+function trackCountFilter(values: string[]): SQL {
+  const length = sql`json_array_length(${releases.tracklist})`;
+  const exact = values.filter((v) => v !== "7+").map(Number);
+  const conditions: SQL[] = [];
+  if (exact.length > 0) conditions.push(sql`${length} IN (${sql.join(exact.map((n) => sql`${n}`), sql`, `)})`);
+  if (values.includes("7+")) conditions.push(sql`${length} >= 7`);
+  return sql`(${sql.join(conditions, sql` OR `)})`;
+}
+
 function sortColumn(field: SortField) {
   switch (field) {
     case "title":
@@ -59,6 +71,8 @@ function sortColumn(field: SortField) {
       return sql`json_extract(${releases.formats}, '$[0].name')`;
     case "rating":
       return releases.ratingAverage;
+    case "tracks":
+      return sql`json_array_length(${releases.tracklist})`;
   }
 }
 
@@ -148,6 +162,10 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   const excludeStyle = parseCommaSeparated(req.query.excludeStyle);
   const excludeFormat = parseCommaSeparated(req.query.excludeFormat);
   const country = parseCommaSeparated(req.query.country);
+  const tracks = parseCommaSeparated(req.query.tracks);
+  if (!tracks.every((t) => TRACK_COUNT_OPTIONS.includes(t))) {
+    return { error: `tracks must be a comma-separated list of ${TRACK_COUNT_OPTIONS.join(", ")}` };
+  }
   const noLinks = req.query.noLinks;
   if (noLinks !== undefined && noLinks !== "only" && noLinks !== "exclude") {
     return { error: "noLinks must be one of only, exclude" };
@@ -164,6 +182,7 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   if (excludeStyle.length > 0) filters.push(jsonArrayHasNone(releases.styles, excludeStyle));
   if (excludeFormat.length > 0) filters.push(jsonFormatNameHasNone(releases.formats, excludeFormat));
   if (country.length > 0) filters.push(inArray(releases.country, country));
+  if (tracks.length > 0) filters.push(trackCountFilter(tracks));
   // A release has no links when it has no video links.
   if (noLinks === "only") filters.push(sql`json_array_length(${releases.videos}) = 0`);
   if (noLinks === "exclude") filters.push(sql`json_array_length(${releases.videos}) > 0`);
@@ -172,7 +191,13 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
 
   const orderExpr = sortColumn(sortField);
   // Unrated releases are noise at either end of a rating sort, so they always go last.
-  const nullsLast = sortField === "rating" ? [sql`${orderExpr} IS NULL`] : [];
+  // Likewise a release with no tracklist has no known track count, so it goes last.
+  const nullsLast =
+    sortField === "rating"
+      ? [sql`${orderExpr} IS NULL`]
+      : sortField === "tracks"
+        ? [sql`${orderExpr} = 0`]
+        : [];
   const orderBy = [...nullsLast, isDescending ? desc(orderExpr) : asc(orderExpr), sql`${releases.id}`];
 
   return { query: { page, pageSize, filters, orderBy, price, currency } };

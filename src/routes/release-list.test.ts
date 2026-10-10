@@ -43,6 +43,7 @@ describe("GET /releases and /releases/facets", () => {
       ratingAverage: number | null;
       masterId: number | null;
       videos: { uri: string; title: string }[];
+      tracklist: { position: string; title: string }[];
     }> = {},
   ) {
     db.insert(releases)
@@ -51,6 +52,7 @@ describe("GET /releases and /releases/facets", () => {
         title,
         ratingAverage: overrides.ratingAverage ?? null,
         videos: overrides.videos ?? [],
+        tracklist: overrides.tracklist ?? [],
         year: overrides.year ?? 2000,
         country: overrides.country ?? null,
         genres: overrides.genres ?? [],
@@ -164,6 +166,29 @@ describe("GET /releases and /releases/facets", () => {
       expect(titles((await get("/releases?sort=year")).body)).toEqual(["C", "B", "A"]);
       expect(titles((await get("/releases?sort=-rating")).body)).toEqual(["C", "B", "A"]);
       expect(titles((await get("/releases?sort=rating")).body)).toEqual(["B", "C", "A"]);
+    });
+
+    it("sorts by track count, with releases that have no tracklist last", async () => {
+      const track = (n: number) => ({ position: String(n), title: `T${n}` });
+      seedRelease(1, "Two", { tracklist: [track(1), track(2)] });
+      seedRelease(2, "None");
+      seedRelease(3, "Five", { tracklist: [1, 2, 3, 4, 5].map(track) });
+
+      expect(titles((await get("/releases?sort=tracks")).body)).toEqual(["Two", "Five", "None"]);
+      expect(titles((await get("/releases?sort=-tracks")).body)).toEqual(["Five", "Two", "None"]);
+    });
+
+    it("filters by track count, with 7+ meaning seven or more", async () => {
+      const tracks = (n: number) =>
+        Array.from({ length: n }, (_, i) => ({ position: String(i + 1), title: `T${i + 1}` }));
+      seedRelease(1, "One", { tracklist: tracks(1) });
+      seedRelease(2, "Three", { tracklist: tracks(3) });
+      seedRelease(3, "Seven", { tracklist: tracks(7) });
+      seedRelease(4, "Twelve", { tracklist: tracks(12) });
+
+      expect(titles((await get("/releases?tracks=3")).body)).toEqual(["Three"]);
+      expect(titles((await get("/releases?tracks=1,7%2B")).body)).toEqual(["One", "Seven", "Twelve"]);
+      expect((await get("/releases?tracks=8")).status).toBe(400);
     });
 
     it("pages the results", async () => {

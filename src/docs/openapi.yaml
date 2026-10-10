@@ -49,6 +49,11 @@ paths:
           description: Comma-separated country names, OR-matched
           schema:
             type: string
+        - name: tracks
+          in: query
+          description: Comma-separated track counts, OR-matched; each is 1 to 6, or 7+ for seven or more
+          schema:
+            type: string
         - name: excludeGenre
           in: query
           description: Comma-separated genre names; releases with any of them are left out
@@ -96,7 +101,7 @@ paths:
           schema:
             type: string
             enum:
-              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating]
+              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks]
             default: title
       responses:
         "200":
@@ -123,6 +128,7 @@ paths:
         - $ref: "#/components/parameters/Style"
         - $ref: "#/components/parameters/Format"
         - $ref: "#/components/parameters/Country"
+        - $ref: "#/components/parameters/Tracks"
         - $ref: "#/components/parameters/ExcludeGenre"
         - $ref: "#/components/parameters/ExcludeStyle"
         - $ref: "#/components/parameters/ExcludeFormat"
@@ -642,6 +648,11 @@ paths:
           description: Comma-separated country names, OR-matched
           schema:
             type: string
+        - name: tracks
+          in: query
+          description: Comma-separated track counts, OR-matched; each is 1 to 6, or 7+ for seven or more
+          schema:
+            type: string
         - name: noLinks
           in: query
           description: "only keeps releases with no video links; exclude leaves them out"
@@ -675,6 +686,8 @@ paths:
                 -format,
                 rating,
                 -rating,
+                tracks,
+                -tracks,
               ]
             default: title
       responses:
@@ -708,6 +721,7 @@ paths:
         - $ref: "#/components/parameters/Style"
         - $ref: "#/components/parameters/Format"
         - $ref: "#/components/parameters/Country"
+        - $ref: "#/components/parameters/Tracks"
         - $ref: "#/components/parameters/ExcludeGenre"
         - $ref: "#/components/parameters/ExcludeStyle"
         - $ref: "#/components/parameters/ExcludeFormat"
@@ -755,6 +769,11 @@ components:
       name: country
       in: query
       description: Comma-separated country names, OR-matched
+      schema: { type: string }
+    Tracks:
+      name: tracks
+      in: query
+      description: Comma-separated track counts, OR-matched; each is 1 to 6, or 7+ for seven or more
       schema: { type: string }
     ExcludeGenre:
       name: excludeGenre
