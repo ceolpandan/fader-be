@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { Router } from "express";
 import type { Db } from "../db/client";
 import { isFadedFor, isNotFadedFor } from "../db/fades";
-import { discogsQueueJobs, releases, scanListings, scanPasses, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, releases, scanListings, scanPasses, sellerInventory, sellerListings, sellers } from "../db/schema";
 import type {
   IndexStartedDto,
   SellerPreviewDto,
@@ -300,6 +300,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       deps.db.delete(scanPasses).where(eq(scanPasses.sellerUsername, username)).run();
       deps.db.delete(scanListings).where(eq(scanListings.sellerUsername, username)).run();
       deps.db.delete(sellerInventory).where(eq(sellerInventory.sellerUsername, username)).run();
+      deps.db.delete(sellerListings).where(eq(sellerListings.sellerUsername, username)).run();
       deps.db.delete(sellers).where(eq(sellers.username, username)).run();
     });
 
@@ -462,6 +463,24 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       .offset((page - 1) * pageSize)
       .all();
 
+    const listingRows =
+      rows.length === 0
+        ? []
+        : deps.db
+            .select()
+            .from(sellerListings)
+            .where(
+              and(
+                eq(sellerListings.sellerUsername, username),
+                inArray(
+                  sellerListings.releaseId,
+                  rows.map((row) => row.releaseId),
+                ),
+              ),
+            )
+            .orderBy(asc(sellerListings.currency), asc(sellerListings.price), asc(sellerListings.listingId))
+            .all();
+
     const dto: SellerInventoryPageDto = {
       items: rows.map((row) => ({
         releaseId: row.releaseId,
@@ -480,6 +499,15 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
         status: row.status,
         firstSeenAt: row.firstSeenAt.toISOString(),
         soldAt: row.soldAt?.toISOString() ?? null,
+        listings: listingRows
+          .filter((listing) => listing.releaseId === row.releaseId)
+          .map((listing) => ({
+            id: listing.listingId,
+            mediaCondition: listing.mediaCondition,
+            sleeveCondition: listing.sleeveCondition,
+            price: listing.price,
+            currency: listing.currency,
+          })),
       })),
       page,
       pageSize,
