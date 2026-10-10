@@ -238,6 +238,57 @@ describe("GET /releases and /releases/facets", () => {
     });
   });
 
+  describe("styleCombo", () => {
+    function seedStyled() {
+      seedRelease(1, "Minimal Electro", { styles: ["Minimal", "Electro"] });
+      seedRelease(2, "Minimal Ambient", { styles: ["Minimal", "Ambient", "Dub"] });
+      seedRelease(3, "Minimal only", { styles: ["Minimal"] });
+      seedRelease(4, "Electro Ambient", { styles: ["Electro", "Ambient"] });
+      seedRelease(5, "Untagged");
+    }
+
+    it("keeps releases that have every style of a combination", async () => {
+      seedStyled();
+      const res = await get("/releases?styleCombo=Minimal,Electro&sort=title");
+      expect(titles(res.body)).toEqual(["Minimal Electro"]);
+      expect(res.body.total).toBe(1);
+    });
+
+    it("keeps releases matching any of several combinations", async () => {
+      seedStyled();
+      const res = await get("/releases?styleCombo=Minimal,Electro&styleCombo=Minimal,Ambient&sort=title");
+      expect(titles(res.body)).toEqual(["Minimal Ambient", "Minimal Electro"]);
+      expect(res.body.total).toBe(2);
+    });
+
+    it("treats a one-style combination as a plain include", async () => {
+      seedStyled();
+      const res = await get("/releases?styleCombo=Dub");
+      expect(titles(res.body)).toEqual(["Minimal Ambient"]);
+    });
+
+    it("drops empty combinations and dedupes identical ones in any order", async () => {
+      seedStyled();
+      const res = await get("/releases?styleCombo=&styleCombo=Electro,Minimal&styleCombo=Minimal,Electro");
+      expect(titles(res.body)).toEqual(["Minimal Electro"]);
+      expect((await get("/releases?styleCombo=")).body.total).toBe(5);
+    });
+
+    it("narrows on top of the other filters", async () => {
+      seedStyled();
+      const res = await get("/releases?styleCombo=Minimal,Ambient&styleCombo=Electro,Ambient&excludeStyle=Dub");
+      expect(titles(res.body)).toEqual(["Electro Ambient"]);
+    });
+
+    it("is ignored by the facets, so counts do not follow combinations", async () => {
+      seedStyled();
+      const plain = await get("/releases/facets");
+      const combo = await get("/releases/facets?styleCombo=Minimal,Electro");
+      expect(combo.status).toBe(200);
+      expect(combo.body).toEqual(plain.body);
+    });
+  });
+
   describe("GET /releases/facets", () => {
     it("counts the releases behind each value, most common first, faded ones excluded", async () => {
       seedRelease(1, "R1", { country: "UK", genres: ["Rock", "Pop"], styles: ["Prog Rock"], formats: format("Vinyl") });

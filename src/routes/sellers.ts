@@ -484,13 +484,14 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       res.status(400).json({ error: parsed.error });
       return;
     }
-    const { page, pageSize, filters, orderBy, price } = parsed.query;
+    const { page, pageSize, filters, styleCombinations, orderBy, price } = parsed.query;
 
     const whereClause = and(
       eq(sellerInventory.sellerUsername, username),
       eq(sellerInventory.status, "active"),
       isNotFadedFor(uid),
       ...filters,
+      styleCombinations ?? undefined,
       price ? priceFilterSql(username, price) : undefined,
     );
 

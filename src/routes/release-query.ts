@@ -47,6 +47,36 @@ function jsonFormatNameOnly(column: SQLiteColumn, values: string[]): SQL {
   return sql`(json_array_length(${column}) > 0 AND NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') NOT IN (${inList(values)})))`;
 }
 
+/** The release has every style in the combination. */
+function jsonArrayHasAll(column: SQLiteColumn, values: string[]): SQL {
+  const each = values.map((v) => sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${v})`);
+  return sql`(${sql.join(each, sql` AND `)})`;
+}
+
+/** The release matches at least one combination. */
+function styleCombinationsFilter(combinations: string[][]): SQL {
+  return sql`(${sql.join(
+    combinations.map((c) => jsonArrayHasAll(releases.styles, c)),
+    sql` OR `,
+  )})`;
+}
+
+/** Each `styleCombo` occurrence as a list of styles; empty ones dropped, identical ones (in any order) deduped. */
+function parseStyleCombinations(value: unknown): string[][] {
+  const occurrences = Array.isArray(value) ? value : [value];
+  const seen = new Set<string>();
+  const combinations: string[][] = [];
+  for (const occurrence of occurrences) {
+    const styles = [...new Set(parseCommaSeparated(occurrence))];
+    if (styles.length === 0) continue;
+    const key = JSON.stringify([...styles].sort());
+    if (seen.has(key)) continue;
+    seen.add(key);
+    combinations.push(styles);
+  }
+  return combinations;
+}
+
 const TRACK_COUNT_OPTIONS = ["1", "2", "3", "4", "5", "6", "7+"];
 
 /** The tracklist length is one of the counts; "7+" stands for seven or more. */
@@ -82,6 +112,11 @@ export interface ReleaseQuery {
   pageSize: number;
   /** Conditions on `releases` for the filters; AND them with the endpoint's own scope. */
   filters: SQL[];
+  /**
+   * The style combinations condition, when `styleCombo` is given. Kept out of `filters` so the
+   * facets, whose counts ignore combinations, don't pick it up; the listing endpoints AND it in.
+   */
+  styleCombinations: SQL | null;
   /** ORDER BY terms, with the release id as the final tie-break. */
   orderBy: SQL[];
   /** The price range, when `priceMin` or `priceMax` is given. Only seller endpoints have listings to apply it to. */
@@ -189,6 +224,9 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   if (yearMin.value !== undefined) filters.push(gte(releases.year, yearMin.value));
   if (yearMax.value !== undefined) filters.push(lte(releases.year, yearMax.value));
 
+  const combinations = parseStyleCombinations(req.query.styleCombo);
+  const styleCombinations = combinations.length > 0 ? styleCombinationsFilter(combinations) : null;
+
   const orderExpr = sortColumn(sortField);
   // Unrated releases are noise at either end of a rating sort, so they always go last.
   // Likewise a release with no tracklist has no known track count, so it goes last.
@@ -200,5 +238,5 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
         : [];
   const orderBy = [...nullsLast, isDescending ? desc(orderExpr) : asc(orderExpr), sql`${releases.id}`];
 
-  return { query: { page, pageSize, filters, orderBy, price, currency } };
+  return { query: { page, pageSize, filters, styleCombinations, orderBy, price, currency } };
 }
