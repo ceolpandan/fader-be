@@ -221,6 +221,9 @@ export const fades = sqliteTable(
     id: integer("id").notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lookupStatus: text("lookup_status").$type<FadeLookupStatus>().notNull().default("done"),
+    /** What Discogs called it, kept from the lookup so an unindexed fade can still be shown. */
+    title: text("title"),
+    artists: text("artists", { mode: "json" }).$type<ReleaseArtistStub[]>(),
   },
   (table) => [primaryKey({ columns: [table.uid, table.kind, table.id] })],
 );

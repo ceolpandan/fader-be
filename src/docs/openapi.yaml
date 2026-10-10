@@ -1303,7 +1303,7 @@ components:
 
     FadedItemDto:
       type: object
-      required: [kind, id, fadedAt, title, artists, year, thumb, versionsIndexed]
+      required: [kind, id, fadedAt, title, artists, year, thumb, versionsIndexed, lookupStatus]
       properties:
         kind:
           type: string
@@ -1317,7 +1317,9 @@ components:
         title:
           type: string
           nullable: true
-          description: Of the lowest-id indexed release the fade hides; null if none is indexed.
+          description: >
+            Of the lowest-id indexed release the fade hides, else the title
+            Discogs gave when the fade was looked up; null if neither is known.
         artists:
           type: array
           items: { $ref: "#/components/schemas/ReleaseArtistStub" }
@@ -1330,6 +1332,10 @@ components:
         versionsIndexed:
           type: integer
           description: Indexed releases the fade hides; 0 when none is indexed.
+        lookupStatus:
+          type: string
+          enum: [pending, done, failed]
+          description: Where the fade's Discogs lookup stands; failed when Discogs could not resolve it.
 
     FadedItemsDto:
       type: object

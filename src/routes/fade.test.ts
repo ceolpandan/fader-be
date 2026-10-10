@@ -364,6 +364,7 @@ describe("fade", () => {
           year: null,
           thumb: null,
           versionsIndexed: 0,
+          lookupStatus: "done",
         },
         expect.objectContaining({ kind: "release", id: 555, title: "Beta", versionsIndexed: 1 }),
         expect.objectContaining({
@@ -383,6 +384,32 @@ describe("fade", () => {
       expect(byTitle.body.items.map((i: { id: number }) => i.id)).toEqual([900]);
       expect(byTitle.body).toMatchObject({ total: 1, fadedTotal: 3 });
       expect(byArtist.body.items.map((i: { id: number }) => i.id)).toEqual([555]);
+    });
+
+    it("shows the title and artists Discogs gave an unindexed fade, and its lookup status", async () => {
+      db.insert(fades)
+        .values({
+          uid: "u1",
+          kind: "master",
+          id: 888,
+          createdAt: new Date(5000),
+          lookupStatus: "failed",
+          title: "Gamma",
+          artists: [{ id: 9, name: "Autechre" }],
+        })
+        .run();
+
+      const res = await asUser(app, "u1").get("/fade/items");
+      const byArtist = await asUser(app, "u1").get("/fade/items?q=autech");
+
+      expect(res.body.items[0]).toMatchObject({
+        id: 888,
+        title: "Gamma",
+        artists: [{ id: 9, name: "Autechre" }],
+        versionsIndexed: 0,
+        lookupStatus: "failed",
+      });
+      expect(byArtist.body.items.map((i: { id: number }) => i.id)).toEqual([888]);
     });
 
     it("paginates", async () => {
