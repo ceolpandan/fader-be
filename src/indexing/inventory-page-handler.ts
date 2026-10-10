@@ -48,12 +48,14 @@ async function storeSellerMetadata(
   const shipsFromCountry = inventoryPage.listings[0]?.ships_from ?? null;
   let sellerRating: number | null = null;
   let sellerNumRatings: number | null = null;
+  let avatarUrl: string | null = null;
 
   if (deps.getUserProfile) {
     try {
       const profile = await deps.getUserProfile(username);
       sellerRating = profile.seller_rating ?? null;
       sellerNumRatings = profile.seller_num_ratings ?? null;
+      avatarUrl = profile.avatar_url || null;
     } catch (error) {
       logger.warn(`Could not fetch Discogs profile for ${username}: ${String(error)}`);
     }
@@ -61,7 +63,7 @@ async function storeSellerMetadata(
 
   deps.db
     .update(sellers)
-    .set({ sellerRating, sellerNumRatings, shipsFromCountry })
+    .set({ sellerRating, sellerNumRatings, shipsFromCountry, avatarUrl })
     .where(eq(sellers.username, username))
     .run();
 }

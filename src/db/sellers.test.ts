@@ -33,6 +33,7 @@ describe("sellers table", () => {
       sellerRating: null,
       sellerNumRatings: null,
       shipsFromCountry: null,
+      avatarUrl: null,
       inventoryTotal: 42_223,
       scanPagesTotal: 100,
       scanPagesFetched: 12,

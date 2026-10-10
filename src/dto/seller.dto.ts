@@ -56,6 +56,7 @@ export interface SellerStatusDto {
   sellerRating: number | null;
   sellerNumRatings: number | null;
   shipsFromCountry: string | null;
+  avatarUrl: string | null;
   /** `scanning` while inventory pages are fetched, `enriching` while releases are, `done` otherwise. */
   phase: IndexingPhase;
   /** Inventory scan progress of the current run; null until page 1 is fetched. */

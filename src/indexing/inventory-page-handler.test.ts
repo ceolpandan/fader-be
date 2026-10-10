@@ -696,16 +696,18 @@ describe("inventory_page handler", () => {
       );
     };
 
-    it("stores rating and ships-from country", async () => {
+    it("stores rating, avatar and ships-from country", async () => {
       await runPage(1, async () => ({
         username: "some-seller",
         seller_rating: 96.4,
         seller_num_ratings: 174,
+        avatar_url: "https://img.discogs.com/avatar.jpg",
       }));
 
       expect(sellerRow()).toMatchObject({
         sellerRating: 96.4,
         sellerNumRatings: 174,
+        avatarUrl: "https://img.discogs.com/avatar.jpg",
         shipsFromCountry: "Germany",
       });
     });

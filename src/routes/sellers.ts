@@ -382,6 +382,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       sellerRating: seller.sellerRating,
       sellerNumRatings: seller.sellerNumRatings,
       shipsFromCountry: seller.shipsFromCountry,
+      avatarUrl: seller.avatarUrl,
       phase,
       scan:
         seller.scanPagesTotal === null

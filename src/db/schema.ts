@@ -52,6 +52,7 @@ export const sellers = sqliteTable("sellers", {
   sellerRating: real("seller_rating"),
   sellerNumRatings: integer("seller_num_ratings"),
   shipsFromCountry: text("ships_from_country"),
+  avatarUrl: text("avatar_url"),
   /** Discogs' `pagination.items` for the seller's inventory, known once page 1 is fetched. */
   inventoryTotal: integer("inventory_total"),
   /** Inventory pages the current run will scan (capped at the Discogs 100-page limit). */

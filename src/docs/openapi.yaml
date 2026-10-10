@@ -925,6 +925,7 @@ components:
           sellerRating,
           sellerNumRatings,
           shipsFromCountry,
+          avatarUrl,
           phase,
           scan,
           etaSeconds,
@@ -951,6 +952,7 @@ components:
           description: Seller rating as a percentage, e.g. 96.4.
         sellerNumRatings: { type: integer, nullable: true }
         shipsFromCountry: { type: string, nullable: true }
+        avatarUrl: { type: string, nullable: true }
         phase:
           type: string
           enum: [scanning, enriching, done]
