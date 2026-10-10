@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, sellers } from "../db/schema";
+import { discogsQueueJobs, scanListings, sellerListings, sellers } from "../db/schema";
 import { checkRunCompletion, failOrphanedRuns, markRunAborted } from "./run-completion";
 
 describe("checkRunCompletion", () => {
@@ -49,6 +49,63 @@ describe("checkRunCompletion", () => {
     const [row] = db.select().from(sellers).where(eq(sellers.username, "some-seller")).all();
     expect(row!.lastIndexStatus).toBe("success");
     expect(row!.lastIndexedAt).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+  });
+
+  describe("listings no longer for sale", () => {
+    const runStart = new Date("2026-01-01T00:00:00.000Z");
+
+    function seedRun(inventoryTotal: number, listingsRead: number[]) {
+      db.insert(sellers)
+        .values({ username: "some-seller", lastIndexStatus: "running", currentRunId: "run-1", inventoryTotal })
+        .run();
+      seedJob("run-1", "inventory_page", "done", {
+        username: "some-seller",
+        page: 1,
+        runStartedAt: runStart.toISOString(),
+      });
+      db.insert(scanListings)
+        .values(
+          listingsRead.map((listingId) => ({
+            runId: "run-1",
+            sellerUsername: "some-seller",
+            sort: "artist" as const,
+            order: "asc" as const,
+            listingId,
+          })),
+        )
+        .run();
+      const seen = (listingId: number, lastSeenAt: Date) => ({
+        listingId,
+        sellerUsername: "some-seller",
+        releaseId: 5,
+        mediaCondition: "Mint (M)",
+        sleeveCondition: null,
+        price: 10,
+        currency: "USD",
+        lastSeenAt,
+      });
+      db.insert(sellerListings)
+        .values([seen(1, runStart), seen(2, new Date("2025-12-01T00:00:00.000Z"))])
+        .run();
+    }
+
+    const storedIds = () => db.select().from(sellerListings).all().map((l) => l.listingId);
+
+    it("deletes the listings a run that read the whole inventory did not see", () => {
+      seedRun(1, [1]);
+
+      checkRunCompletion(db, "run-1");
+
+      expect(storedIds()).toEqual([1]);
+    });
+
+    it("keeps them when the run fell short of the inventory, since they may just be out of reach", () => {
+      seedRun(2, [1]);
+
+      checkRunCompletion(db, "run-1");
+
+      expect(storedIds()).toEqual([1, 2]);
+    });
   });
 
   it("does nothing while a job for the run is still pending or processing", () => {

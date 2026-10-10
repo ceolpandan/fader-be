@@ -854,6 +854,7 @@ components:
           status,
           firstSeenAt,
           soldAt,
+          listings,
         ]
       properties:
         releaseId: { type: integer }
@@ -900,6 +901,29 @@ components:
         soldAt:
           type: string
           nullable: true
+        listings:
+          type: array
+          description: >
+            Every listing of the release for this seller, cheapest first within
+            a currency. Empty until the seller is next indexed.
+          items:
+            $ref: "#/components/schemas/ListingDto"
+
+    ListingDto:
+      type: object
+      description: One copy of a release a seller has for sale.
+      required: [id, mediaCondition, sleeveCondition, price, currency]
+      properties:
+        id: { type: integer, description: Discogs listing id. }
+        mediaCondition: { type: string, example: Near Mint (NM or M-) }
+        sleeveCondition:
+          type: string
+          nullable: true
+        price: { type: number }
+        currency:
+          type: string
+          description: Currency code as Discogs reports it; prices are not converted.
+          example: EUR
 
     SellerInventoryPageDto:
       type: object

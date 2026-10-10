@@ -89,6 +89,16 @@ export interface ScanPassDto {
   endedAt: string | null;
 }
 
+/** One copy of a release a seller has for sale. */
+export interface ListingDto {
+  id: number;
+  mediaCondition: string;
+  sleeveCondition: string | null;
+  price: number;
+  /** ISO 4217 code as Discogs reports it; prices are not converted between currencies. */
+  currency: string;
+}
+
 export interface SellerInventoryItemDto {
   releaseId: number;
   title: string;
@@ -106,6 +116,8 @@ export interface SellerInventoryItemDto {
   status: SellerInventoryStatus;
   firstSeenAt: string;
   soldAt: string | null;
+  /** Every listing of the release, cheapest first within a currency. Empty until the seller is next indexed. */
+  listings: ListingDto[];
 }
 
 export interface SellerInventoryPageDto {
@@ -128,7 +140,7 @@ export interface SellerInventoryFacetsDto {
 }
 
 /** A row of `GET /releases`: a seller inventory item without the seller-specific fields. */
-export type ReleaseListItemDto = Omit<SellerInventoryItemDto, "status" | "firstSeenAt" | "soldAt">;
+export type ReleaseListItemDto = Omit<SellerInventoryItemDto, "status" | "firstSeenAt" | "soldAt" | "listings">;
 
 export interface ReleaseListPageDto {
   items: ReleaseListItemDto[];

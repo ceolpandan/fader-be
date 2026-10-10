@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, fades, releases, scanListings, scanPasses, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, fades, releases, scanListings, scanPasses, sellerInventory, sellerListings, sellers } from "../db/schema";
 import { DiscogsNotFoundError, DiscogsTransientError } from "../discogs-client";
 import type { DiscogsInventoryPage } from "../types/discogs-api";
 import type { DiscogsReads } from "./sellers";
@@ -348,6 +348,12 @@ describe("sellers routes", () => {
         ])
         .run();
       db.insert(fades).values({ uid: "test-uid", kind: "release", id: 1, createdAt: now }).run();
+      db.insert(sellerListings)
+        .values([
+          { listingId: 1, sellerUsername: "some-seller", releaseId: 1, mediaCondition: "Mint (M)", price: 5, currency: "USD", lastSeenAt: now },
+          { listingId: 2, sellerUsername: "other-seller", releaseId: 1, mediaCondition: "Mint (M)", price: 5, currency: "USD", lastSeenAt: now },
+        ])
+        .run();
 
       const res = await authedRequest(app).delete("/sellers/some-seller");
 
@@ -356,6 +362,7 @@ describe("sellers routes", () => {
       expect(db.select().from(sellerInventory).all().map((i) => i.sellerUsername)).toEqual(["other-seller"]);
       expect(db.select().from(scanPasses).all().map((s) => s.sellerUsername)).toEqual(["other-seller"]);
       expect(db.select().from(scanListings).all().map((l) => l.sellerUsername)).toEqual(["other-seller"]);
+      expect(db.select().from(sellerListings).all().map((l) => l.sellerUsername)).toEqual(["other-seller"]);
       expect(
         db.select().from(discogsQueueJobs).all().map((j) => (j.payload as { username: string }).username),
       ).toEqual(["other-seller"]);
@@ -986,6 +993,50 @@ describe("sellers routes", () => {
         })
         .run();
     }
+
+    describe("listings", () => {
+      const seedListing = (
+        listingId: number,
+        releaseId: number,
+        price: number,
+        currency = "USD",
+        sleeveCondition: string | null = null,
+      ) =>
+        db
+          .insert(sellerListings)
+          .values({
+            listingId,
+            sellerUsername: "some-seller",
+            releaseId,
+            mediaCondition: "Near Mint (NM or M-)",
+            sleeveCondition,
+            price,
+            currency,
+            lastSeenAt: new Date(),
+          })
+          .run();
+
+      it("lists every listing of each release, cheapest first within a currency", async () => {
+        seedRelease(1, "Two copies");
+        seedRelease(2, "No listings yet");
+        seedInventoryRow(1, "active");
+        seedInventoryRow(2, "active");
+        seedListing(11, 1, 30, "USD", "Very Good (VG)");
+        seedListing(12, 1, 8.5, "USD");
+        seedListing(13, 1, 5, "EUR");
+        seedListing(14, 3, 1);
+
+        const res = await authedRequest(app).get("/sellers/some-seller/inventory");
+
+        const byId = (id: number) => res.body.items.find((i: { releaseId: number }) => i.releaseId === id);
+        expect(byId(1).listings).toEqual([
+          { id: 13, mediaCondition: "Near Mint (NM or M-)", sleeveCondition: null, price: 5, currency: "EUR" },
+          { id: 12, mediaCondition: "Near Mint (NM or M-)", sleeveCondition: null, price: 8.5, currency: "USD" },
+          { id: 11, mediaCondition: "Near Mint (NM or M-)", sleeveCondition: "Very Good (VG)", price: 30, currency: "USD" },
+        ]);
+        expect(byId(2).listings).toEqual([]);
+      });
+    });
 
     it("excludes rows whose release hasn't been enriched yet", async () => {
       // seller_inventory row exists (release 1 discovered), but no releases row yet

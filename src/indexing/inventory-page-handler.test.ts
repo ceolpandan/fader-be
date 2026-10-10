@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, releases, scanListings, scanPasses, sellerInventory, sellers } from "../db/schema";
+import { discogsQueueJobs, releases, scanListings, scanPasses, sellerInventory, sellerListings, sellers } from "../db/schema";
 import { DiscogsAuthError, DiscogsNotFoundError, DiscogsPaginationCapError } from "../discogs-client";
 import type { DiscogsInventoryPage, DiscogsUserProfile } from "../types/discogs-api";
 import { createInventoryPageHandler, SCAN_PASSES } from "./inventory-page-handler";
@@ -102,6 +102,61 @@ describe("inventory_page handler", () => {
     enqueue.mock.calls.map(([job]) => job).filter((job) => job.type === "release_detail");
   const passRows = () => db.select().from(scanPasses).all();
   const nextPayload = { username: "some-seller", runStartedAt: RUN_STARTED };
+
+  describe("listings", () => {
+    const storedListings = () => db.select().from(sellerListings).orderBy(sellerListings.listingId).all();
+
+    it("stores every listing of a release, each with its own condition and price", async () => {
+      const page = inventoryPage(1, 1, [[5, 501], [5, 502]], 2);
+      page.listings[0]!.condition = "Mint (M)";
+      page.listings[0]!.sleeve_condition = "Very Good (VG)";
+      page.listings[1]!.condition = "Good (G)";
+      page.listings[1]!.price = { currency: "EUR", value: 7.5 };
+      const handler = createInventoryPageHandler({ db, enqueue, getInventory: async () => page });
+
+      await handler({ username: "some-seller", page: 1, runStartedAt: RUN_STARTED }, ctx);
+
+      expect(db.select().from(sellerInventory).all()).toHaveLength(1);
+      expect(storedListings()).toEqual([
+        {
+          listingId: 501,
+          sellerUsername: "some-seller",
+          releaseId: 5,
+          mediaCondition: "Mint (M)",
+          sleeveCondition: "Very Good (VG)",
+          price: 20,
+          currency: "USD",
+          lastSeenAt: new Date(RUN_STARTED),
+        },
+        {
+          listingId: 502,
+          sellerUsername: "some-seller",
+          releaseId: 5,
+          mediaCondition: "Good (G)",
+          sleeveCondition: null,
+          price: 7.5,
+          currency: "EUR",
+          lastSeenAt: new Date(RUN_STARTED),
+        },
+      ]);
+    });
+
+    it("updates a listing read again instead of duplicating it", async () => {
+      const first = inventoryPage(1, 1, [[5, 501]], 1);
+      const second = inventoryPage(1, 1, [[5, 501]], 1);
+      second.listings[0]!.price = { currency: "USD", value: 12 };
+      const run = (page: DiscogsInventoryPage) =>
+        createInventoryPageHandler({ db, enqueue, getInventory: async () => page })(
+          { username: "some-seller", page: 1, runStartedAt: RUN_STARTED },
+          ctx,
+        );
+
+      await run(first);
+      await run(second);
+
+      expect(storedListings().map((l) => [l.listingId, l.price])).toEqual([[501, 12]]);
+    });
+  });
 
   it("writes and enqueues nothing when the seller is removed while the page is being fetched", async () => {
     const getInventory = vi.fn(async () => {

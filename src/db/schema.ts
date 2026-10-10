@@ -76,6 +76,25 @@ export const sellerInventory = sqliteTable(
   (table) => [primaryKey({ columns: [table.sellerUsername, table.releaseId] })],
 );
 
+/**
+ * One copy of a release a seller has for sale. `seller_inventory` keeps one row per release; this
+ * keeps every listing behind it, each with its own condition and price.
+ */
+export const sellerListings = sqliteTable(
+  "seller_listings",
+  {
+    listingId: integer("listing_id").primaryKey(),
+    sellerUsername: text("seller_username").notNull(),
+    releaseId: integer("release_id").notNull(),
+    mediaCondition: text("media_condition").notNull(),
+    sleeveCondition: text("sleeve_condition"),
+    price: real("price").notNull(),
+    currency: text("currency").notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("seller_listings_seller_release_idx").on(table.sellerUsername, table.releaseId)],
+);
+
 export type ScanSort = "artist" | "listed" | "label" | "catno" | "item" | "price" | "audio";
 export type ScanOrder = "asc" | "desc";
 /**

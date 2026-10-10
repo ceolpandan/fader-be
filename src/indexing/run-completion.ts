@@ -1,6 +1,7 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { discogsQueueJobs, sellers, type InventoryPagePayload } from "../db/schema";
+import { discogsQueueJobs, sellerListings, sellers, type InventoryPagePayload } from "../db/schema";
+import { isInventoryCovered, observedListings } from "./coverage";
 
 /** The run was cut short (Discogs gave up or refused our token): its seller ends in `error`, not `success`. */
 export function markRunAborted(db: Db, runId: string): void {
@@ -62,10 +63,27 @@ export function checkRunCompletion(db: Db, runId: string): void {
 
   if (!anyInventoryJob) return;
 
-  const { username } = anyInventoryJob.payload as InventoryPagePayload;
+  const { username, runStartedAt } = anyInventoryJob.payload as InventoryPagePayload;
+
+  purgeUnseenListings(db, username, runId, new Date(runStartedAt));
 
   db.update(sellers)
     .set({ lastIndexStatus: "success", lastIndexedAt: new Date() })
     .where(and(eq(sellers.username, username), eq(sellers.lastIndexStatus, "running")))
+    .run();
+}
+
+/**
+ * A listing this run did not see is gone from the seller's inventory (sold or withdrawn). Only a
+ * run that read every listing can say so: after a partial scan an unseen listing may just be
+ * out of reach.
+ */
+function purgeUnseenListings(db: Db, username: string, runId: string, runStartedAt: Date): void {
+  const [seller] = db.select().from(sellers).where(eq(sellers.username, username)).all();
+  if (!seller || seller.currentRunId !== runId || seller.inventoryTotal === null) return;
+  if (!isInventoryCovered(seller.inventoryTotal, observedListings(db, runId))) return;
+
+  db.delete(sellerListings)
+    .where(and(eq(sellerListings.sellerUsername, username), lt(sellerListings.lastSeenAt, runStartedAt)))
     .run();
 }

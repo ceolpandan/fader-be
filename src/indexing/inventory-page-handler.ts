@@ -6,6 +6,7 @@ import {
   scanListings,
   scanPasses,
   sellerInventory,
+  sellerListings,
   sellers,
 } from "../db/schema";
 import type {
@@ -320,6 +321,21 @@ export function createInventoryPageHandler(
         .insert(scanListings)
         .values({ runId: context.runId, sellerUsername: username, sort, order, listingId: listing.id })
         .onConflictDoNothing()
+        .run();
+
+      const stored = {
+        sellerUsername: username,
+        releaseId: listing.release.id,
+        mediaCondition: listing.condition,
+        sleeveCondition: listing.sleeve_condition ?? null,
+        price: listing.price.value,
+        currency: listing.price.currency,
+        lastSeenAt: now,
+      };
+      deps.db
+        .insert(sellerListings)
+        .values({ listingId: listing.id, ...stored })
+        .onConflictDoUpdate({ target: sellerListings.listingId, set: stored })
         .run();
 
       const [existing] = deps.db
