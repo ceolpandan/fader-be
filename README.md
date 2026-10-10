@@ -31,7 +31,7 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 ### Stored releases
 
 - `GET /releases` — paginated, filterable list of the stored releases (`?page=&pageSize=&sort=` and the filters)
-- `GET /releases/facets` — the genres, styles, formats and countries of the releases a filter leaves
+- `GET /releases/filter-options` — the genres, styles, formats and countries the filter dialog offers, most common first
 
 Set `DISCOGS_TOKEN` (personal access token from
 https://www.discogs.com/settings/developers) to raise Discogs' rate limit.
@@ -49,6 +49,7 @@ SQLite database file lives (defaults to `./data/fader.sqlite`).
 - `npm run lint` — ESLint over `src/`
 - `npm run db:generate` — generate a Drizzle migration from `src/db/schema.ts`
 - `npm run db:migrate` — apply migrations to the SQLite file at `DB_PATH`
+- `npm run db:import -- <releases.xml> <new.sqlite> [--carry-over old.sqlite] [--sample 1000x6]` — build a new database from the Discogs dump (see `docs/adr/0007-catalogue-from-data-dump.md`)
 
 ## Layout
 

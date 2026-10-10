@@ -111,41 +111,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
-  /releases/facets:
+  /releases/filter-options:
     get:
-      operationId: getReleaseFacets
+      operationId: getReleaseFilterOptions
       summary: >
-        The genres, styles, format names and countries of all stored releases,
-        each with how many releases carry it, counted among the releases the same
-        filters would list (faded ones excluded).
-      parameters:
-        - $ref: "#/components/parameters/Genre"
-        - $ref: "#/components/parameters/Style"
-        - $ref: "#/components/parameters/Format"
-        - $ref: "#/components/parameters/Country"
-        - $ref: "#/components/parameters/Tracks"
-        - $ref: "#/components/parameters/ExcludeGenre"
-        - $ref: "#/components/parameters/ExcludeStyle"
-        - $ref: "#/components/parameters/ExcludeFormat"
-        - $ref: "#/components/parameters/OnlyGenre"
-        - $ref: "#/components/parameters/OnlyStyle"
-        - $ref: "#/components/parameters/OnlyFormat"
-        - $ref: "#/components/parameters/NoLinks"
-        - $ref: "#/components/parameters/YearMin"
-        - $ref: "#/components/parameters/YearMax"
+        The genres, styles, format names and countries the filter dialog offers,
+        each list most common first. Built when the catalogue is imported, so it
+        does not follow filters or fades and carries no counts.
       responses:
         "200":
-          description: Facets
+          description: Filter options
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReleaseFacetsDto"
-        "400":
-          description: Invalid query parameters
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
+                $ref: "#/components/schemas/ReleaseFilterOptionsDto"
   /releases/{id}:
     get:
       operationId: getRelease
@@ -408,8 +387,7 @@ components:
       description: >
         A style combination: comma-separated style names a release must all have.
         Repeat the parameter for several combinations; a release passes when it
-        matches any one of them. `GET /releases` only; the facets ignore it, so
-        counts do not follow combinations.
+        matches any one of them.
       style: form
       explode: true
       schema:
@@ -495,34 +473,23 @@ components:
           type: integer
           description: How many releases the user has faded. Ignores filters.
 
-    FacetValueDto:
+    ReleaseFilterOptionsDto:
       type: object
-      required: [value, count]
-      properties:
-        value: { type: string }
-        count:
-          type: integer
-          description: How many of the releases matching the filters carry the value.
-
-    ReleaseFacetsDto:
-      type: object
-      description: >
-        The values of each category among the releases matching the filters, most
-        common first (ties alphabetical). Values no matching release carries are left out.
+      description: The values of each category, most common first.
       required: [genres, styles, formats, countries]
       properties:
         genres:
           type: array
-          items: { $ref: "#/components/schemas/FacetValueDto" }
+          items: { type: string }
         styles:
           type: array
-          items: { $ref: "#/components/schemas/FacetValueDto" }
+          items: { type: string }
         formats:
           type: array
-          items: { $ref: "#/components/schemas/FacetValueDto" }
+          items: { type: string }
         countries:
           type: array
-          items: { $ref: "#/components/schemas/FacetValueDto" }
+          items: { type: string }
 
     FadeRequestDto:
       type: object

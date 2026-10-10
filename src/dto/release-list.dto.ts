@@ -1,17 +1,11 @@
 import type { ReleaseArtistStub, ReleaseFormat } from "../db/schema";
 
-/** A facet value with how many of the releases matching the current filters carry it. */
-export interface FacetValueDto {
-  value: string;
-  count: number;
-}
-
-/** The values of each category among the releases matching the filters, most common first. */
-export interface ReleaseFacetsDto {
-  genres: FacetValueDto[];
-  styles: FacetValueDto[];
-  formats: FacetValueDto[];
-  countries: FacetValueDto[];
+/** The values the filter dialog offers for each category, most common first. */
+export interface ReleaseFilterOptionsDto {
+  genres: string[];
+  styles: string[];
+  formats: string[];
+  countries: string[];
 }
 
 /** A row of `GET /releases`. */

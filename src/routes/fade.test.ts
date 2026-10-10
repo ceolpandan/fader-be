@@ -61,7 +61,7 @@ describe("fade", () => {
         genres: overrides.genres ?? [],
         styles: overrides.styles ?? [],
         formats: [],
-        labelIds: [],
+        labels: [],
         artists: (overrides.artists ?? []).map((name, i) => ({ id: i + 1, name })),
       })
       .run();
@@ -533,23 +533,6 @@ describe("fade", () => {
       const res = await user.get("/releases?style=Ambient");
 
       expect(res.body).toMatchObject({ total: 1, fadedCount: 2 });
-    });
-
-    it("leaves facet options only for what is still visible", async () => {
-      const user = asUser(app, "u1");
-      await user.post("/fade").send({ masterId: 900 });
-
-      const res = await user.get("/releases/facets");
-      expect(res.body.styles.map((s: { value: string }) => s.value)).toEqual(["Ambient", "House"]);
-    });
-
-    it("keeps a facet option while an unfaded release still carries it", async () => {
-      seedRelease(700, null, { styles: ["Techno"] });
-      const user = asUser(app, "u1");
-      await user.post("/fade").send({ masterId: 900 });
-
-      const res = await user.get("/releases/facets");
-      expect(res.body.styles).toContainEqual({ value: "Techno", count: 1 });
     });
   });
 });

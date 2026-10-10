@@ -1,7 +1,6 @@
 import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Request } from "express";
-import { releases } from "../db/schema";
+import { releaseFormats, releaseGenres, releaseStyles, releases } from "../db/schema";
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "tracks"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
@@ -22,43 +21,42 @@ function inList(values: string[]): SQL {
   );
 }
 
-function jsonArrayHasAny(column: SQLiteColumn, values: string[]): SQL {
-  return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value IN (${inList(values)}))`;
+/** The side tables behind the genre, style and format filters; each holds one row per value a release has. */
+const SIDE_TABLES = {
+  genre: { table: releaseGenres, release: releaseGenres.releaseId, value: releaseGenres.genre },
+  style: { table: releaseStyles, release: releaseStyles.releaseId, value: releaseStyles.style },
+  format: { table: releaseFormats, release: releaseFormats.releaseId, value: releaseFormats.format },
+};
+type SideTable = keyof typeof SIDE_TABLES;
+
+function sideRow(kind: SideTable, extra: SQL): SQL {
+  const side = SIDE_TABLES[kind];
+  return sql`SELECT 1 FROM ${side.table} WHERE ${side.release} = ${releases.id} AND ${extra}`;
 }
 
-function jsonFormatNameHasAny(column: SQLiteColumn, values: string[]): SQL {
-  return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') IN (${inList(values)}))`;
+function hasAny(kind: SideTable, values: string[]): SQL {
+  return sql`EXISTS (${sideRow(kind, sql`${SIDE_TABLES[kind].value} IN (${inList(values)})`)})`;
 }
 
-function jsonArrayHasNone(column: SQLiteColumn, values: string[]): SQL {
-  return sql`NOT ${jsonArrayHasAny(column, values)}`;
+function hasNone(kind: SideTable, values: string[]): SQL {
+  return sql`NOT ${hasAny(kind, values)}`;
 }
 
-function jsonFormatNameHasNone(column: SQLiteColumn, values: string[]): SQL {
-  return sql`NOT ${jsonFormatNameHasAny(column, values)}`;
-}
-
-/** The array is non-empty and every value is in the list. */
-function jsonArrayOnly(column: SQLiteColumn, values: string[]): SQL {
-  return sql`(json_array_length(${column}) > 0 AND NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE value NOT IN (${inList(values)})))`;
-}
-
-function jsonFormatNameOnly(column: SQLiteColumn, values: string[]): SQL {
-  return sql`(json_array_length(${column}) > 0 AND NOT EXISTS (SELECT 1 FROM json_each(${column}) WHERE json_extract(value, '$.name') NOT IN (${inList(values)})))`;
+/** The release has at least one value and every value is in the list. */
+function hasOnly(kind: SideTable, values: string[]): SQL {
+  const side = SIDE_TABLES[kind];
+  return sql`(EXISTS (${sideRow(kind, sql`1`)}) AND NOT EXISTS (${sideRow(kind, sql`${side.value} NOT IN (${inList(values)})`)}))`;
 }
 
 /** The release has every style in the combination. */
-function jsonArrayHasAll(column: SQLiteColumn, values: string[]): SQL {
-  const each = values.map((v) => sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${v})`);
+function hasAllStyles(styles: string[]): SQL {
+  const each = styles.map((v) => sql`EXISTS (${sideRow("style", sql`${releaseStyles.style} = ${v}`)})`);
   return sql`(${sql.join(each, sql` AND `)})`;
 }
 
 /** The release matches at least one combination. */
 function styleCombinationsFilter(combinations: string[][]): SQL {
-  return sql`(${sql.join(
-    combinations.map((c) => jsonArrayHasAll(releases.styles, c)),
-    sql` OR `,
-  )})`;
+  return sql`(${sql.join(combinations.map(hasAllStyles), sql` OR `)})`;
 }
 
 /** Each `styleCombo` occurrence as a list of styles; empty ones dropped, identical ones (in any order) deduped. */
@@ -81,7 +79,7 @@ const TRACK_COUNT_OPTIONS = ["1", "2", "3", "4", "5", "6", "7+"];
 
 /** The tracklist length is one of the counts; "7+" stands for seven or more. */
 function trackCountFilter(values: string[]): SQL {
-  const length = sql`json_array_length(${releases.tracklist})`;
+  const length = releases.trackCount;
   const exact = values.filter((v) => v !== "7+").map(Number);
   const conditions: SQL[] = [];
   if (exact.length > 0) conditions.push(sql`${length} IN (${sql.join(exact.map((n) => sql`${n}`), sql`, `)})`);
@@ -96,11 +94,11 @@ function sortColumn(field: SortField) {
     case "year":
       return releases.year;
     case "artist":
-      return sql`json_extract(${releases.artists}, '$[0].name')`;
+      return releases.artistSort;
     case "format":
-      return sql`json_extract(${releases.formats}, '$[0].name')`;
+      return releases.formatSort;
     case "tracks":
-      return sql`json_array_length(${releases.tracklist})`;
+      return releases.trackCount;
   }
 }
 
@@ -164,15 +162,15 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   }
 
   const filters: SQL[] = [];
-  if (genre.length > 0) filters.push(jsonArrayHasAny(releases.genres, genre));
-  if (style.length > 0) filters.push(jsonArrayHasAny(releases.styles, style));
-  if (format.length > 0) filters.push(jsonFormatNameHasAny(releases.formats, format));
-  if (onlyGenre.length > 0) filters.push(jsonArrayOnly(releases.genres, onlyGenre));
-  if (onlyStyle.length > 0) filters.push(jsonArrayOnly(releases.styles, onlyStyle));
-  if (onlyFormat.length > 0) filters.push(jsonFormatNameOnly(releases.formats, onlyFormat));
-  if (excludeGenre.length > 0) filters.push(jsonArrayHasNone(releases.genres, excludeGenre));
-  if (excludeStyle.length > 0) filters.push(jsonArrayHasNone(releases.styles, excludeStyle));
-  if (excludeFormat.length > 0) filters.push(jsonFormatNameHasNone(releases.formats, excludeFormat));
+  if (genre.length > 0) filters.push(hasAny("genre", genre));
+  if (style.length > 0) filters.push(hasAny("style", style));
+  if (format.length > 0) filters.push(hasAny("format", format));
+  if (onlyGenre.length > 0) filters.push(hasOnly("genre", onlyGenre));
+  if (onlyStyle.length > 0) filters.push(hasOnly("style", onlyStyle));
+  if (onlyFormat.length > 0) filters.push(hasOnly("format", onlyFormat));
+  if (excludeGenre.length > 0) filters.push(hasNone("genre", excludeGenre));
+  if (excludeStyle.length > 0) filters.push(hasNone("style", excludeStyle));
+  if (excludeFormat.length > 0) filters.push(hasNone("format", excludeFormat));
   if (country.length > 0) filters.push(inArray(releases.country, country));
   if (tracks.length > 0) filters.push(trackCountFilter(tracks));
   // A release has no links when it has no video links.
@@ -186,7 +184,7 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
 
   const orderExpr = sortColumn(sortField);
   // A release with no tracklist has no known track count, so it goes last.
-  const nullsLast = sortField === "tracks" ? [sql`${orderExpr} = 0`] : [];
+  const nullsLast = sortField === "tracks" ? [sql`${releases.trackCount} = 0`] : [];
   const orderBy = [...nullsLast, isDescending ? desc(orderExpr) : asc(orderExpr), sql`${releases.id}`];
 
   return { query: { page, pageSize, filters, styleCombinations, orderBy } };

@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
+import { rebuildFilterOptions } from "../db/filter-options";
 import { fades, releases } from "../db/schema";
 import { DiscogsQueue } from "../queue/discogs-queue";
 import { createApp } from "../app";
@@ -22,7 +23,7 @@ vi.mock("firebase-admin/auth", () => ({
   getAuth: vi.fn(() => ({ verifyIdToken })),
 }));
 
-describe("GET /releases and /releases/facets", () => {
+describe("GET /releases and /releases/filter-options", () => {
   let dbPath: string;
   let db: Db;
   let queue: DiscogsQueue;
@@ -41,7 +42,7 @@ describe("GET /releases and /releases/facets", () => {
       formats: { name: string; descriptions: string[] }[];
       artists: { id: number; name: string }[];
       masterId: number | null;
-      videos: { uri: string; title: string }[];
+      videos: { src: string; title: string }[];
       tracklist: { position: string; title: string }[];
     }> = {},
   ) {
@@ -56,7 +57,7 @@ describe("GET /releases and /releases/facets", () => {
         genres: overrides.genres ?? [],
         styles: overrides.styles ?? [],
         formats: overrides.formats ?? [],
-        labelIds: [],
+        labels: [],
         artists: overrides.artists ?? [],
         masterId: overrides.masterId ?? null,
       })
@@ -111,7 +112,7 @@ describe("GET /releases and /releases/facets", () => {
     });
 
     it("filters by noLinks: only keeps releases without video links, exclude drops them", async () => {
-      seedRelease(1, "Linked", { videos: [{ uri: "https://youtube.com/x", title: "x" }] });
+      seedRelease(1, "Linked", { videos: [{ src: "https://youtube.com/x", title: "x" }] });
       seedRelease(2, "Bare");
 
       expect(titles((await get("/releases?noLinks=only")).body)).toEqual(["Bare"]);
@@ -258,69 +259,30 @@ describe("GET /releases and /releases/facets", () => {
       const res = await get("/releases?styleCombo=Minimal,Ambient&styleCombo=Electro,Ambient&excludeStyle=Dub");
       expect(titles(res.body)).toEqual(["Electro Ambient"]);
     });
-
-    it("is ignored by the facets, so counts do not follow combinations", async () => {
-      seedStyled();
-      const plain = await get("/releases/facets");
-      const combo = await get("/releases/facets?styleCombo=Minimal,Electro");
-      expect(combo.status).toBe(200);
-      expect(combo.body).toEqual(plain.body);
-    });
   });
 
-  describe("GET /releases/facets", () => {
-    it("counts the releases behind each value, most common first, faded ones excluded", async () => {
+  describe("GET /releases/filter-options", () => {
+    it("lists the values of each category, most common first, whatever the filters or fades", async () => {
       seedRelease(1, "R1", { country: "UK", genres: ["Rock", "Pop"], styles: ["Prog Rock"], formats: format("Vinyl") });
-      seedRelease(2, "R2", { country: "US", genres: ["Rock"], styles: ["Indie Rock"], formats: format("CD") });
-      seedRelease(3, "Faded", { country: "JP", genres: ["Jazz"], styles: ["Bop"], formats: format("Cassette") });
+      seedRelease(2, "R2", { country: "US", genres: ["Rock"], styles: ["Indie Rock", "Prog Rock"], formats: format("Vinyl") });
+      seedRelease(3, "Faded", { country: "UK", genres: ["Jazz"], styles: ["Bop"], formats: format("Cassette") });
       db.insert(fades).values({ uid: "test-uid", kind: "release", id: 3, createdAt: new Date() }).run();
+      rebuildFilterOptions(db.$client);
 
-      const res = await get("/releases/facets");
+      const res = await get("/releases/filter-options");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        genres: [
-          { value: "Rock", count: 2 },
-          { value: "Pop", count: 1 },
-        ],
-        styles: [
-          { value: "Indie Rock", count: 1 },
-          { value: "Prog Rock", count: 1 },
-        ],
-        formats: [
-          { value: "CD", count: 1 },
-          { value: "Vinyl", count: 1 },
-        ],
-        countries: [
-          { value: "UK", count: 1 },
-          { value: "US", count: 1 },
-        ],
+        genres: ["Rock", "Jazz", "Pop"],
+        styles: ["Prog Rock", "Bop", "Indie Rock"],
+        formats: ["Vinyl", "Cassette"],
+        countries: ["UK", "US"],
       });
     });
 
-    it("counts only the releases matching the filters, so the counts follow the draft", async () => {
-      seedRelease(1, "R1", { genres: ["Rock", "Pop"], styles: ["Prog Rock"] });
-      seedRelease(2, "R2", { genres: ["Rock"], styles: ["Indie Rock"] });
-      seedRelease(3, "R3", { genres: ["Jazz"], styles: ["Bop"] });
-
-      const res = await get("/releases/facets?genre=Pop");
-      expect(res.body.genres).toEqual([
-        { value: "Pop", count: 1 },
-        { value: "Rock", count: 1 },
-      ]);
-      expect(res.body.styles).toEqual([{ value: "Prog Rock", count: 1 }]);
-
-      const excluded = await get("/releases/facets?excludeGenre=Rock");
-      expect(excluded.body.genres).toEqual([{ value: "Jazz", count: 1 }]);
-    });
-
-    it("rejects an invalid filter like the release list does", async () => {
-      const res = await get("/releases/facets?yearMin=abc");
-      expect(res.status).toBe(400);
-    });
-
-    it("returns empty arrays when there are no releases", async () => {
-      const res = await get("/releases/facets");
+    it("returns empty arrays when there are no options", async () => {
+      const res = await get("/releases/filter-options");
       expect(res.body).toEqual({ genres: [], styles: [], formats: [], countries: [] });
     });
+
   });
 });

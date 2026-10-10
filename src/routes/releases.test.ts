@@ -75,10 +75,10 @@ describe("releases routes", () => {
         genres: ["Electronic"],
         styles: ["Tech House", "Electro"],
         formats: [],
-        labelIds: [5],
+        labels: [{ id: 5, name: "Svek" }],
         artists: [{ id: 1, name: "The Persuader" }],
         tracklist: expectedDto.tracklist,
-        videos: expectedDto.videos,
+        videos: [{ src: "https://youtube.com/x", title: "Track One (video)" }],
       })
       .run();
 

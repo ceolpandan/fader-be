@@ -1,11 +1,10 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { Router, type Response } from "express";
 import type { Db } from "../db/client";
-import { isFadedFor, isNotFadedFor } from "../db/fades";
-import { releases } from "../db/schema";
-import type { ReleaseFacetsDto, ReleaseListPageDto } from "../dto/release-list.dto";
+import { isFadedViaFades, isNotFadedFor } from "../db/fades";
+import { filterOptions, releases, type FilterOptionKind } from "../db/schema";
+import type { ReleaseFilterOptionsDto, ReleaseListPageDto } from "../dto/release-list.dto";
 import { mapReleaseRowToDto } from "../dto/mappers";
-import { countFacets } from "./facets";
 import { parseReleaseQuery } from "./release-query";
 
 export interface ReleasesRouterDeps {
@@ -34,23 +33,19 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       .where(and(...where))
       .all()[0]!.count;
 
-  router.get("/facets", (req, res) => {
-    const parsed = parseReleaseQuery(req);
-    if ("error" in parsed) {
-      res.status(400).json({ error: parsed.error });
-      return;
-    }
+  router.get("/filter-options", (_req, res) => {
     const rows = deps.db
-      .select({
-        genres: releases.genres,
-        styles: releases.styles,
-        formats: releases.formats,
-        country: releases.country,
-      })
-      .from(releases)
-      .where(and(isNotFadedFor(req.user!.uid), ...parsed.query.filters))
+      .select({ kind: filterOptions.kind, value: filterOptions.value })
+      .from(filterOptions)
+      .orderBy(filterOptions.kind, filterOptions.position)
       .all();
-    const dto: ReleaseFacetsDto = countFacets(rows);
+    const valuesOf = (kind: FilterOptionKind) => rows.filter((row) => row.kind === kind).map((row) => row.value);
+    const dto: ReleaseFilterOptionsDto = {
+      genres: valuesOf("genre"),
+      styles: valuesOf("style"),
+      formats: valuesOf("format"),
+      countries: valuesOf("country"),
+    };
     res.json(dto);
   });
 
@@ -88,7 +83,7 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       page,
       pageSize,
       total,
-      fadedCount: countReleases(isFadedFor(uid)),
+      fadedCount: countReleases(isFadedViaFades(uid)),
     };
     res.json(dto);
   });

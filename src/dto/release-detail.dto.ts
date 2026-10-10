@@ -1,4 +1,11 @@
-import type { ReleaseArtistStub, ReleaseTrack, ReleaseVideo } from "../db/schema";
+import type { ReleaseArtistStub, ReleaseTrack } from "../db/schema";
+
+/** A video of a release; `uri` is the dump's `src`. */
+export interface ReleaseVideoDto {
+  uri: string;
+  title?: string;
+  duration?: number;
+}
 
 /** GET /releases/{id} — served from our own `releases` table, not live Discogs. */
 export interface ReleaseDetailDto {
@@ -10,5 +17,5 @@ export interface ReleaseDetailDto {
   styles?: string[];
   artists: ReleaseArtistStub[];
   tracklist: ReleaseTrack[];
-  videos: ReleaseVideo[];
+  videos: ReleaseVideoDto[];
 }

@@ -1,0 +1,10 @@
+# The catalogue is imported from the monthly Discogs data dump
+
+`releases` holds the Electronic releases of the Discogs releases dump (CC0), loaded by `npm run db:import` (fader-ui#100). `main` stores no data from the Discogs API except what a fade lookup needs.
+
+- **Fresh file each month:** the importer builds a new SQLite file (migrations, load, then indexes) and does not write into the live database. Only `fades` and `user_settings` are carried over (`--carry-over`). Swap it in by pointing `DB_PATH` at it with the API stopped. Because the dump is re-read in full, there is no tombstone logic: a release deleted or merged on Discogs is gone from the next file.
+- **Sample mode:** `--sample <chunks>x<MB>` reads evenly spaced chunks of the plain `.xml`, which keeps the real mix of eras (the Electronic share falls from 99% to about 20% across the file). It is for trying the app and benchmarks, not for production.
+- **Shape:** title, artists, genres, styles, formats, year, country, labels `{id, name, catno}[]`, `masterId` (0 in the dump means none, stored as null), the full tracklist and videos trimmed to `{src, title, duration}`. `master_versions` is filled from the same pass.
+- **Query support (fader-ui#103, #105):** `release_genres`, `release_styles` and `release_formats` hold one row per value, kept in step with the JSON columns by triggers (migration `0021`); `track_count`, `artist_sort` and `format_sort` are generated columns; indexes serve every Explore sort. On a 500k-row sample this took list queries from 0.3-0.7 s (full scans) to under 30 ms. The importer drops the indexes before the load and rebuilds them after.
+- **Not in the dump:** images, ratings, haves and wants, label country. See `0006-no-enrichment.md`.
+- **Filter options:** the filter dialog offers a fixed list of genres, styles, formats and countries per catalogue, most common first, from the `filter_options` table that the importer (and migration `0022`) fills. `GET /releases/filter-options` serves it; there are no counts and nothing follows the current filters, so the old `GET /releases/facets` is gone (fader-ui#100).
