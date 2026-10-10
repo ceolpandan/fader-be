@@ -11,6 +11,7 @@ import {
   DiscogsQueue,
   INLINE_PRIORITY,
   MAX_CAP_RETRIES,
+  MAX_TRANSIENT_ATTEMPTS,
   NonRetryableError,
   PACING_MS,
   QueueUnavailableError,
@@ -489,8 +490,8 @@ describe("DiscogsQueue", () => {
 
     it("backs off 1, 2, 4, 8 then 10 min, and resets to 1 min after a success", async () => {
       const handler = flaky(5, new DiscogsTransientError("boom"));
-      queue.registerHandler("release_detail", handler);
-      queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
+      queue.registerHandler("inventory_page", handler);
+      queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 1 } });
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
 
@@ -505,8 +506,8 @@ describe("DiscogsQueue", () => {
       expect(queue.getPause()).toBeNull();
 
       // the next failure starts over at 1 min
-      queue.registerHandler("release_detail", flaky(1, new DiscogsTransientError("again")));
-      queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 2 } });
+      queue.registerHandler("inventory_page", flaky(1, new DiscogsTransientError("again")));
+      queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 2 } });
       await vi.advanceTimersByTimeAsync(PACING_MS);
       expect(queue.getPause()!.backoffMs).toBe(MIN);
     });
@@ -548,12 +549,12 @@ describe("DiscogsQueue", () => {
       const handler = vi.fn(async () => {
         throw new DiscogsTransientError("down");
       });
-      queue.registerHandler("release_detail", handler);
+      queue.registerHandler("inventory_page", handler);
       const aborted = vi.fn();
       queue.onRunAborted(aborted);
-      const first = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
-      const sameRun = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 2 } });
-      const otherRun = queue.enqueue({ runId: "b", type: "release_detail", payload: { releaseId: 3 } });
+      const first = queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 1 } });
+      const sameRun = queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 2 } });
+      const otherRun = queue.enqueue({ runId: "b", type: "inventory_page", payload: { username: "u", page: 3 } });
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
@@ -568,6 +569,68 @@ describe("DiscogsQueue", () => {
       expect(status(otherRun).status).toBe("failed");
       expect(aborted).toHaveBeenCalledWith("a");
       expect(aborted).toHaveBeenCalledWith("b");
+      expect(queue.getPause()).toBeNull();
+    });
+
+    it("skips an enrich job after MAX_TRANSIENT_ATTEMPTS Discogs errors and carries on with the next", async () => {
+      const handler = vi.fn(async (payload: { releaseId: number }) => {
+        if (payload.releaseId === 1) throw new DiscogsTransientError("500");
+      });
+      queue.registerHandler("release_detail", handler);
+      const settled = vi.fn();
+      queue.onSettled(settled);
+      const bad = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
+      const good = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 2 } });
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(0);
+      for (let i = 1; i < MAX_TRANSIENT_ATTEMPTS; i++) {
+        expect(status(bad).status).toBe("pending");
+        await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
+      }
+
+      expect(status(bad)).toMatchObject({ status: "failed", attempts: 0 });
+      expect(status(bad).errorMessage).toContain("Skipped after");
+      expect(status(good).status).toBe("pending");
+      expect(settled).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
+      expect(status(good).status).toBe("done");
+    });
+
+    it("does not skip a scan page on repeated Discogs errors", async () => {
+      queue.registerHandler("inventory_page", vi.fn(async () => {
+        throw new DiscogsTransientError("500");
+      }));
+      const id = queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 1 } });
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(0);
+      for (let i = 0; i < MAX_TRANSIENT_ATTEMPTS + 1; i++) {
+        await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
+      }
+
+      expect(status(id).status).toBe("pending");
+    });
+
+    it("still gives up when every enrich job keeps failing, skipping only the first few", async () => {
+      queue.registerHandler("release_detail", async () => {
+        throw new DiscogsTransientError("down");
+      });
+      const aborted = vi.fn();
+      queue.onRunAborted(aborted);
+      const ids = [1, 2, 3, 4].map((releaseId) =>
+        queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId } }),
+      );
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(0);
+      for (let i = 0; i < 4 + MAX_CAP_RETRIES; i++) {
+        await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
+      }
+
+      expect(aborted).toHaveBeenCalledWith("a");
+      expect(ids.map((id) => status(id).status)).toEqual(["failed", "failed", "failed", "failed"]);
       expect(queue.getPause()).toBeNull();
     });
 

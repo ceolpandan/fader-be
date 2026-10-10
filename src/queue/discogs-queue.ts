@@ -23,6 +23,11 @@ export const PAUSE_BASE_MS = 60_000;
 export const PAUSE_CAP_MS = 10 * 60_000;
 /** Retries at the cap (with no success in between) before the queue gives up on Discogs. */
 export const MAX_CAP_RETRIES = 5;
+/**
+ * Transient Discogs errors one enrich job may hit before it is skipped. The queue still pauses
+ * after each, so a real outage keeps counting towards MAX_CAP_RETRIES and aborts the runs.
+ */
+export const MAX_TRANSIENT_ATTEMPTS = 3;
 
 export class NonRetryableError extends Error {}
 
@@ -65,6 +70,8 @@ export interface QueuePause {
 export class DiscogsQueue {
   private readonly handlers = new Map<QueueJobType, JobHandler>();
   private readonly backoffUntil = new Map<number, number>();
+  /** Transient Discogs errors per enrich job. Memory only, so a restart gives a job fresh strikes. */
+  private readonly transientFailures = new Map<number, number>();
   private readonly settledListeners: SettledListener[] = [];
   private readonly waiters = new Map<
     number,
@@ -251,6 +258,7 @@ export class DiscogsQueue {
       .where(eq(discogsQueueJobs.id, job.id))
       .run();
     this.backoffUntil.delete(job.id);
+    this.transientFailures.delete(job.id);
     this.resetPause();
     logger.info(`Job ${highlightId(job.id)} done`);
     this.notifySettled({ ...job, status: "done", updatedAt });
@@ -269,6 +277,7 @@ export class DiscogsQueue {
       .where(eq(discogsQueueJobs.id, job.id))
       .run();
     this.backoffUntil.delete(job.id);
+    this.transientFailures.delete(job.id);
     logger.error(`Job ${highlightId(job.id)} failed permanently: ${errorMessage}`);
     this.notifySettled({ ...job, status: "failed", attempts, errorMessage, updatedAt }, cause);
   }
@@ -288,8 +297,11 @@ export class DiscogsQueue {
   }
 
   /**
-   * Discogs is erroring: put the job back untouched (a pause costs no attempts), keep every run
-   * off Discogs for the next backoff step, and release inline callers instead of making them wait.
+   * Discogs is erroring: keep every run off Discogs for the next backoff step and release inline
+   * callers instead of making them wait. An enrich job goes back untouched (a pause costs no
+   * attempts) until it has hit MAX_TRANSIENT_ATTEMPTS errors; then it is skipped, so one release
+   * Discogs cannot serve does not hold up the rest. The pause and the failure counters carry on
+   * either way, so a real outage still ends in `giveUp`.
    */
   private pauseAndRetry(job: QueueJobRow, err: DiscogsTransientError): void {
     this.consecutiveFailures += 1;
@@ -304,11 +316,18 @@ export class DiscogsQueue {
     const backoffMs = Math.max(stepMs, err.retryAfterMs ?? 0);
     this.pause = { retryAt: Date.now() + backoffMs, backoffMs };
 
-    this.db
-      .update(discogsQueueJobs)
-      .set({ status: "pending", errorMessage: err.message, updatedAt: new Date() })
-      .where(eq(discogsQueueJobs.id, job.id))
-      .run();
+    const failures = (this.transientFailures.get(job.id) ?? 0) + 1;
+    if (job.type === "release_detail" && failures >= MAX_TRANSIENT_ATTEMPTS) {
+      // Fail it before releasing the other waiters, so its own caller gets the real error.
+      this.markFailed(job, `Skipped after ${failures} Discogs errors: ${err.message}`, job.attempts, err);
+    } else {
+      this.transientFailures.set(job.id, failures);
+      this.db
+        .update(discogsQueueJobs)
+        .set({ status: "pending", errorMessage: err.message, updatedAt: new Date() })
+        .where(eq(discogsQueueJobs.id, job.id))
+        .run();
+    }
 
     logger.warn(
       `Discogs is erroring, pausing the queue for ${backoffMs}ms (failure ${this.consecutiveFailures} in a row): ${err.message}`,
@@ -360,6 +379,7 @@ export class DiscogsQueue {
       .run();
 
     for (const id of pendingIds) {
+      this.transientFailures.delete(id);
       this.waiters.get(id)?.reject(cause);
       this.waiters.delete(id);
     }
