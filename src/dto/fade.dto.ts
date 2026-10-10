@@ -8,12 +8,19 @@ export interface FadeRequestDto {
 
 /**
  * The stored fade: the master when the release is known to have one, otherwise the release
- * itself (a release we haven't resolved yet is upgraded to its master by the lookup).
+ * itself (a release we haven't resolved yet is upgraded to its master by the lookup). The
+ * request waits for that lookup, so the answer is usually `done`; `pending` means it was still
+ * running when the wait gave up, and `failed` that Discogs could not resolve it.
  */
 export interface FadeResponseDto {
   kind: FadeKind;
   id: number;
   lookupStatus: FadeLookupStatus;
+  /** Null when no title is known. */
+  title: string | null;
+  artists: ReleaseArtistStub[];
+  /** Releases the fade hides: the master's versions, or 1 for a release. Null unless `done`. */
+  versionCount: number | null;
 }
 
 export interface FadedIdsDto {
