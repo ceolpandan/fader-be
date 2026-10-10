@@ -40,7 +40,14 @@ describe("fade_lookup handler", () => {
   const fade = (uid: string, kind: FadeKind, id: number) =>
     db.insert(fades).values({ uid, kind, id, createdAt: new Date(1000), lookupStatus: "pending" }).run();
   const fadeRows = () => db.select().from(fades).all();
-  const release = (masterId?: number) => ({ id: 1, master_id: masterId }) as DiscogsRelease;
+  const release = (masterId?: number) =>
+    ({
+      id: 1,
+      master_id: masterId,
+      title: "Alpha",
+      artists: [{ id: 7, name: "Aphex Twin", anv: "", join: "", role: "", resource_url: "" }],
+    }) as DiscogsRelease;
+  const stored = { title: "Alpha", artists: [{ id: 7, name: "Aphex Twin" }] };
 
   it("upgrades a release fade to its master and queues the master's lookup", async () => {
     fade("u1", "release", 1);
@@ -49,7 +56,14 @@ describe("fade_lookup handler", () => {
     await handler()({ uid: "u1", kind: "release", id: 1 }, ctx);
 
     expect(fadeRows()).toEqual([
-      { uid: "u1", kind: "master", id: 900, createdAt: new Date(1000), lookupStatus: "pending" },
+      {
+        uid: "u1",
+        kind: "master",
+        id: 900,
+        createdAt: new Date(1000),
+        lookupStatus: "pending",
+        ...stored,
+      },
     ]);
     expect(enqueue).toHaveBeenCalledWith({
       runId: "fade:u1:900",
@@ -66,7 +80,9 @@ describe("fade_lookup handler", () => {
 
     await handler()({ uid: "u1", kind: "release", id: 1 }, ctx);
 
-    expect(fadeRows()).toMatchObject([{ kind: "master", id: 900, lookupStatus: "done" }]);
+    expect(fadeRows()).toMatchObject([
+      { kind: "master", id: 900, lookupStatus: "done", ...stored },
+    ]);
   });
 
   it("keeps a release without a master as it is and marks it done", async () => {
@@ -75,7 +91,9 @@ describe("fade_lookup handler", () => {
 
     await handler()({ uid: "u1", kind: "release", id: 1 }, ctx);
 
-    expect(fadeRows()).toMatchObject([{ kind: "release", id: 1, lookupStatus: "done" }]);
+    expect(fadeRows()).toMatchObject([
+      { kind: "release", id: 1, lookupStatus: "done", ...stored },
+    ]);
     expect(enqueue).not.toHaveBeenCalled();
   });
 

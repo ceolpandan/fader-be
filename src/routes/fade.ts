@@ -9,6 +9,7 @@ import {
   releases,
   sellerInventory,
   type FadeKind,
+  type ReleaseArtistStub,
   type ReleaseDetailPayload,
 } from "../db/schema";
 import type {
@@ -166,7 +167,14 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
     const uid = req.user!.uid;
 
     const fadeRows = deps.db
-      .select({ kind: fades.kind, id: fades.id, createdAt: fades.createdAt })
+      .select({
+        kind: fades.kind,
+        id: fades.id,
+        createdAt: fades.createdAt,
+        lookupStatus: fades.lookupStatus,
+        title: fades.title,
+        artists: fades.artists,
+      })
       .from(fades)
       .where(eq(fades.uid, uid))
       .orderBy(desc(fades.createdAt), desc(fades.id))
@@ -203,15 +211,17 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
       else versionsByFade.set(key, [row]);
     }
 
-    const matches = (versions: typeof hidden): boolean =>
-      versions.some(
-        (v) =>
-          v.title.toLowerCase().includes(q) ||
-          v.artists.some((artist) => artist.name.toLowerCase().includes(q)),
+    const matches = (
+      candidates: { title: string | null; artists: ReleaseArtistStub[] | null }[],
+    ): boolean =>
+      candidates.some(
+        (c) =>
+          c.title?.toLowerCase().includes(q) ||
+          c.artists?.some((artist) => artist.name.toLowerCase().includes(q)),
       );
 
     const matching = fadeRows.filter(
-      (fade) => !q || matches(versionsByFade.get(`${fade.kind}:${fade.id}`) ?? []),
+      (fade) => !q || matches([...(versionsByFade.get(`${fade.kind}:${fade.id}`) ?? []), fade]),
     );
     const items: FadedItemDto[] = matching
       .slice((page - 1) * pageSize, page * pageSize)
@@ -222,11 +232,12 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
           kind: fade.kind,
           id: fade.id,
           fadedAt: fade.createdAt.toISOString(),
-          title: first?.title ?? null,
-          artists: first?.artists ?? [],
+          title: first?.title ?? fade.title,
+          artists: first?.artists ?? fade.artists ?? [],
           year: first?.year ?? null,
           thumb: first?.thumb ?? null,
           versionsIndexed: versions.length,
+          lookupStatus: fade.lookupStatus,
         };
       });
 

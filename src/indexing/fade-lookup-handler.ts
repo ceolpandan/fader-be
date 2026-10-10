@@ -74,11 +74,13 @@ export function createFadeLookupHandler(
         throw err;
       }
 
+      const title = release.title;
+      const artists = release.artists.map((artist) => ({ id: artist.id, name: artist.name }));
       const masterId = release.master_id || null;
       if (!masterId) {
         deps.db
           .update(fades)
-          .set({ lookupStatus: "done" })
+          .set({ lookupStatus: "done", title, artists })
           .where(fadeRow(uid, kind, id))
           .run();
         return;
@@ -97,8 +99,13 @@ export function createFadeLookupHandler(
             id: masterId,
             createdAt: fade.createdAt,
             lookupStatus: "pending",
+            title,
+            artists,
           })
-          .onConflictDoNothing()
+          .onConflictDoUpdate({
+            target: [fades.uid, fades.kind, fades.id],
+            set: { title, artists },
+          })
           .run();
       });
       enqueueFadeLookup(deps.enqueue, uid, "master", masterId);
