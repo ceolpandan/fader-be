@@ -235,7 +235,7 @@ describe("fade", () => {
       await user.post("/fade").send({ masterId: 900 });
 
       const res = await user.get("/sellers/seller-1/inventory/facets");
-      expect(res.body.styles).toEqual(["Ambient", "House"]);
+      expect(res.body.styles.map((s: { value: string }) => s.value)).toEqual(["Ambient", "House"]);
     });
 
     it("keeps a facet option while an unfaded release still carries it", async () => {
@@ -245,7 +245,7 @@ describe("fade", () => {
       await user.post("/fade").send({ masterId: 900 });
 
       const res = await user.get("/sellers/seller-1/inventory/facets");
-      expect(res.body.styles).toContain("Techno");
+      expect(res.body.styles).toContainEqual({ value: "Techno", count: 1 });
     });
   });
 });

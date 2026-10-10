@@ -27,7 +27,15 @@ import {
   type DiscogsQueue,
 } from "../queue/discogs-queue";
 import { logger } from "../util/logger";
-import { collectFacets, parseFacetGenres, parseReleaseQuery } from "./release-query";
+import {
+  countCurrencies,
+  countFacets,
+  matchesPrice,
+  priceBoundaries,
+  priceBuckets,
+  type ListingPrice,
+} from "./facets";
+import { parseReleaseQuery, priceFilterSql } from "./release-query";
 
 /**
  * Inventory items the run has seen so far: distinct items since its first pass began, out of
@@ -392,8 +400,46 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     const { username } = req.params;
     const { uid } = req.user!;
 
-    const rows = deps.db
+    const parsed = parseReleaseQuery(req);
+    if ("error" in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const { filters, price, currency: requestedCurrency } = parsed.query;
+
+    const forSale = and(
+      eq(sellerInventory.sellerUsername, username),
+      eq(sellerInventory.status, "active"),
+      isNotFadedFor(uid),
+    );
+    const listingsOf = (releaseIds: Set<number>) => {
+      const listings = deps.db
+        .select({
+          releaseId: sellerListings.releaseId,
+          price: sellerListings.price,
+          currency: sellerListings.currency,
+        })
+        .from(sellerListings)
+        .where(eq(sellerListings.sellerUsername, username))
+        .all();
+      return listings.filter((l) => releaseIds.has(l.releaseId));
+    };
+
+    // Counts follow the filters, as the inventory rows do; the currencies and the price
+    // boundaries describe the whole inventory, so they stay put while the filters change.
+    const inventory = deps.db
+      .select({ releaseId: releases.id })
+      .from(sellerInventory)
+      .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
+      .where(forSale)
+      .all();
+    const inventoryListings = listingsOf(new Set(inventory.map((row) => row.releaseId)));
+    const currencies = countCurrencies(inventoryListings);
+    const currency = requestedCurrency ?? currencies[0]?.currency ?? null;
+
+    const matching = deps.db
       .select({
+        releaseId: releases.id,
         genres: releases.genres,
         styles: releases.styles,
         formats: releases.formats,
@@ -401,10 +447,30 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       })
       .from(sellerInventory)
       .innerJoin(releases, eq(sellerInventory.releaseId, releases.id))
-      .where(and(eq(sellerInventory.sellerUsername, username), isNotFadedFor(uid)))
+      .where(and(forSale, ...filters))
       .all();
+    const matchingListings = listingsOf(new Set(matching.map((row) => row.releaseId)));
+    const listingsByRelease = new Map<number, ListingPrice[]>();
+    for (const listing of matchingListings) {
+      listingsByRelease.set(listing.releaseId, [...(listingsByRelease.get(listing.releaseId) ?? []), listing]);
+    }
+    const inPriceRange = price
+      ? matching.filter((row) => matchesPrice(listingsByRelease.get(row.releaseId) ?? [], price))
+      : matching;
 
-    const dto: SellerInventoryFacetsDto = collectFacets(rows, parseFacetGenres(req));
+    const dto: SellerInventoryFacetsDto = {
+      ...countFacets(inPriceRange),
+      currencies,
+      currency,
+      priceBuckets:
+        currency === null
+          ? []
+          : priceBuckets(
+              priceBoundaries(inventoryListings, currency),
+              matching.map((row) => listingsByRelease.get(row.releaseId) ?? []),
+              currency,
+            ),
+    };
     res.json(dto);
   });
 
@@ -417,13 +483,14 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       res.status(400).json({ error: parsed.error });
       return;
     }
-    const { page, pageSize, filters, orderBy } = parsed.query;
+    const { page, pageSize, filters, orderBy, price } = parsed.query;
 
     const whereClause = and(
       eq(sellerInventory.sellerUsername, username),
       eq(sellerInventory.status, "active"),
       isNotFadedFor(uid),
       ...filters,
+      price ? priceFilterSql(username, price) : undefined,
     );
 
     const total = deps.db

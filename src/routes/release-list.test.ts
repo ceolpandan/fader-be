@@ -214,7 +214,7 @@ describe("GET /releases and /releases/facets", () => {
   });
 
   describe("GET /releases/facets", () => {
-    it("returns distinct values across all enriched releases, faded ones excluded", async () => {
+    it("counts the releases behind each value, most common first, faded ones excluded", async () => {
       seedRelease(1, "R1", { country: "UK", genres: ["Rock", "Pop"], styles: ["Prog Rock"], formats: format("Vinyl") });
       seedRelease(2, "R2", { country: "US", genres: ["Rock"], styles: ["Indie Rock"], formats: format("CD") });
       seedRelease(3, "Faded", { country: "JP", genres: ["Jazz"], styles: ["Bop"], formats: format("Cassette") });
@@ -223,11 +223,44 @@ describe("GET /releases and /releases/facets", () => {
       const res = await get("/releases/facets");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        genres: ["Pop", "Rock"],
-        styles: ["Indie Rock", "Prog Rock"],
-        formats: ["CD", "Vinyl"],
-        countries: ["UK", "US"],
+        genres: [
+          { value: "Rock", count: 2 },
+          { value: "Pop", count: 1 },
+        ],
+        styles: [
+          { value: "Indie Rock", count: 1 },
+          { value: "Prog Rock", count: 1 },
+        ],
+        formats: [
+          { value: "CD", count: 1 },
+          { value: "Vinyl", count: 1 },
+        ],
+        countries: [
+          { value: "UK", count: 1 },
+          { value: "US", count: 1 },
+        ],
       });
+    });
+
+    it("counts only the releases matching the filters, so the counts follow the draft", async () => {
+      seedRelease(1, "R1", { genres: ["Rock", "Pop"], styles: ["Prog Rock"] });
+      seedRelease(2, "R2", { genres: ["Rock"], styles: ["Indie Rock"] });
+      seedRelease(3, "R3", { genres: ["Jazz"], styles: ["Bop"] });
+
+      const res = await get("/releases/facets?genre=Pop");
+      expect(res.body.genres).toEqual([
+        { value: "Pop", count: 1 },
+        { value: "Rock", count: 1 },
+      ]);
+      expect(res.body.styles).toEqual([{ value: "Prog Rock", count: 1 }]);
+
+      const excluded = await get("/releases/facets?excludeGenre=Rock");
+      expect(excluded.body.genres).toEqual([{ value: "Jazz", count: 1 }]);
+    });
+
+    it("rejects an invalid filter like the release list does", async () => {
+      const res = await get("/releases/facets?yearMin=abc");
+      expect(res.status).toBe(400);
     });
 
     it("returns empty arrays when nothing is enriched", async () => {
