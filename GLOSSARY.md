@@ -1,6 +1,6 @@
 # Fader
 
-Fader helps a Discogs collector browse releases and hide the ones they aren't interested in. It keeps its own copy of release details so browsing doesn't depend on live Discogs. This is the `main-tou` branch: it has no sellers, inventories or listings, which the Discogs API terms of use don't allow (see `docs/adr/0005-main-tou-branch.md`).
+Fader helps a Discogs collector browse releases and hide the ones they aren't interested in. It keeps its own copy of release details so browsing doesn't depend on live Discogs. It has no sellers, inventories or listings, which the Discogs API terms of use don't allow (see `docs/adr/0005-no-seller-features.md`).
 
 ## Language
 

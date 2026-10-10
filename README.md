@@ -6,8 +6,8 @@ directly. Only exposes what the extension needs (release/master id, title, thumb
 etc.), not Discogs' full payloads.
 
 Stores the releases it fetches in a local database, through a Discogs-rate-limited
-request queue, and lists and filters them for `fader-ui`. This is the `main-tou` branch,
-which has no seller, inventory or listing features (see `docs/adr/0005-main-tou-branch.md`).
+request queue, and lists and filters them for `fader-ui`. It has no seller, inventory or listing
+features (see `docs/adr/0005-no-seller-features.md`).
 
 ## Run locally
 
