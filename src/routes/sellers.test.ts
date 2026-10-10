@@ -1185,6 +1185,38 @@ describe("sellers routes", () => {
       expect(ids(formatRes)).toEqual([1]);
     });
 
+    it("filters by styleCombo: every style of a combination, any of several combinations, ANDed with other filters", async () => {
+      seedRelease(1, "Minimal Electro", { styles: ["Minimal", "Electro"], year: 2001 });
+      seedRelease(2, "Minimal Ambient", { styles: ["Minimal", "Ambient"], year: 2002 });
+      seedRelease(3, "Minimal only", { styles: ["Minimal"], year: 2003 });
+      seedRelease(4, "Untagged");
+      seedInventoryRow(1, "active");
+      seedInventoryRow(2, "active");
+      seedInventoryRow(3, "active");
+      seedInventoryRow(4, "active");
+      const ids = (res: { body: { items: { releaseId: number }[] } }) => res.body.items.map((i) => i.releaseId).sort();
+
+      const one = await authedRequest(app).get("/sellers/some-seller/inventory?styleCombo=Minimal,Electro");
+      expect(ids(one)).toEqual([1]);
+      expect(one.body.total).toBe(1);
+
+      const two = await authedRequest(app).get(
+        "/sellers/some-seller/inventory?styleCombo=Minimal,Electro&styleCombo=Minimal,Ambient",
+      );
+      expect(ids(two)).toEqual([1, 2]);
+
+      const narrowed = await authedRequest(app).get(
+        "/sellers/some-seller/inventory?styleCombo=Minimal,Electro&styleCombo=Minimal,Ambient&yearMin=2002",
+      );
+      expect(ids(narrowed)).toEqual([2]);
+
+      const facets = await authedRequest(app).get("/sellers/some-seller/inventory/facets?styleCombo=Minimal,Electro");
+      expect(facets.status).toBe(200);
+      expect(facets.body.styles).toEqual(
+        (await authedRequest(app).get("/sellers/some-seller/inventory/facets")).body.styles,
+      );
+    });
+
     it("filters by noLinks: only keeps releases without video links, exclude drops them", async () => {
       seedRelease(1, "Linked", { videos: [{ uri: "https://youtube.com/x", title: "x" }] });
       seedRelease(2, "Bare");

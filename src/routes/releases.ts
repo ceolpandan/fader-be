@@ -97,7 +97,8 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       res.status(400).json({ error: parsed.error });
       return;
     }
-    const { page, pageSize, filters, orderBy } = parsed.query;
+    const { page, pageSize, styleCombinations, orderBy } = parsed.query;
+    const filters = styleCombinations ? [...parsed.query.filters, styleCombinations] : parsed.query.filters;
 
     const total = countReleases(isNotFadedFor(uid), ...filters);
     const rows = deps.db
