@@ -115,25 +115,36 @@ paths:
     get:
       operationId: getReleaseFacets
       summary: >
-        Distinct genres, styles, format names and countries across all enriched
-        releases (faded ones excluded; not affected by any filters, except that
-        `genre` narrows the styles).
+        The genres, styles, format names and countries of all enriched releases,
+        each with how many releases carry it, counted among the releases the same
+        filters would list (faded ones excluded).
       parameters:
-        - name: genre
-          in: query
-          required: false
-          description: >
-            Comma-separated genre names; styles are then taken only from
-            releases that have one of these genres.
-          schema:
-            type: string
+        - $ref: "#/components/parameters/Genre"
+        - $ref: "#/components/parameters/Style"
+        - $ref: "#/components/parameters/Format"
+        - $ref: "#/components/parameters/Country"
+        - $ref: "#/components/parameters/ExcludeGenre"
+        - $ref: "#/components/parameters/ExcludeStyle"
+        - $ref: "#/components/parameters/ExcludeFormat"
+        - $ref: "#/components/parameters/OnlyGenre"
+        - $ref: "#/components/parameters/OnlyStyle"
+        - $ref: "#/components/parameters/OnlyFormat"
+        - $ref: "#/components/parameters/NoLinks"
+        - $ref: "#/components/parameters/YearMin"
+        - $ref: "#/components/parameters/YearMax"
       responses:
         "200":
           description: Facets
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SellerInventoryFacetsDto"
+                $ref: "#/components/schemas/ReleaseFacetsDto"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /releases/{id}:
     get:
       operationId: getRelease
@@ -587,6 +598,9 @@ paths:
           in: query
           schema:
             type: integer
+        - $ref: "#/components/parameters/PriceMin"
+        - $ref: "#/components/parameters/PriceMax"
+        - $ref: "#/components/parameters/Currency"
         - name: sort
           in: query
           schema:
@@ -622,24 +636,32 @@ paths:
     get:
       operationId: getSellerInventoryFacets
       summary: >
-        Distinct genres, styles, format names, and countries present across a
-        seller's full inventory (all statuses, faded items excluded; not
-        affected by any inventory filters, except that `genre` narrows the
-        styles).
+        The genres, styles, format names and countries of a seller's active
+        inventory, each with how many releases carry it, counted among the
+        releases the same filters would list (faded ones excluded). Also the
+        currencies the seller lists in and price buckets.
       parameters:
         - name: username
           in: path
           required: true
           schema:
             type: string
-        - name: genre
-          in: query
-          required: false
-          description: >
-            Comma-separated genre names; styles are then taken only from
-            releases that have one of these genres.
-          schema:
-            type: string
+        - $ref: "#/components/parameters/Genre"
+        - $ref: "#/components/parameters/Style"
+        - $ref: "#/components/parameters/Format"
+        - $ref: "#/components/parameters/Country"
+        - $ref: "#/components/parameters/ExcludeGenre"
+        - $ref: "#/components/parameters/ExcludeStyle"
+        - $ref: "#/components/parameters/ExcludeFormat"
+        - $ref: "#/components/parameters/OnlyGenre"
+        - $ref: "#/components/parameters/OnlyStyle"
+        - $ref: "#/components/parameters/OnlyFormat"
+        - $ref: "#/components/parameters/NoLinks"
+        - $ref: "#/components/parameters/YearMin"
+        - $ref: "#/components/parameters/YearMax"
+        - $ref: "#/components/parameters/PriceMin"
+        - $ref: "#/components/parameters/PriceMax"
+        - $ref: "#/components/parameters/Currency"
       responses:
         "200":
           description: Facets
@@ -647,8 +669,103 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SellerInventoryFacetsDto"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
 
 components:
+  parameters:
+    Genre:
+      name: genre
+      in: query
+      description: Comma-separated genre names, OR-matched
+      schema: { type: string }
+    Style:
+      name: style
+      in: query
+      description: Comma-separated style names, OR-matched
+      schema: { type: string }
+    Format:
+      name: format
+      in: query
+      description: Comma-separated format names (e.g. Vinyl, CD), OR-matched
+      schema: { type: string }
+    Country:
+      name: country
+      in: query
+      description: Comma-separated country names, OR-matched
+      schema: { type: string }
+    ExcludeGenre:
+      name: excludeGenre
+      in: query
+      description: Comma-separated genre names; releases with any of them are left out
+      schema: { type: string }
+    ExcludeStyle:
+      name: excludeStyle
+      in: query
+      description: Comma-separated style names; releases with any of them are left out
+      schema: { type: string }
+    ExcludeFormat:
+      name: excludeFormat
+      in: query
+      description: Comma-separated format names; releases with any of them are left out
+      schema: { type: string }
+    OnlyGenre:
+      name: onlyGenre
+      in: query
+      description: Comma-separated genre names; keeps releases whose genres are all in the list
+      schema: { type: string }
+    OnlyStyle:
+      name: onlyStyle
+      in: query
+      description: Comma-separated style names; keeps releases whose styles are all in the list
+      schema: { type: string }
+    OnlyFormat:
+      name: onlyFormat
+      in: query
+      description: Comma-separated format names; keeps releases whose formats are all in the list
+      schema: { type: string }
+    NoLinks:
+      name: noLinks
+      in: query
+      description: "only keeps releases with no video links; exclude leaves them out"
+      schema:
+        type: string
+        enum: [only, exclude]
+    YearMin:
+      name: yearMin
+      in: query
+      schema: { type: integer }
+    YearMax:
+      name: yearMax
+      in: query
+      schema: { type: integer }
+    PriceMin:
+      name: priceMin
+      in: query
+      description: >
+        Keeps releases with a listing priced at least this much, in `currency`
+        (required with it). Seller endpoints only.
+      schema: { type: number, minimum: 0 }
+    PriceMax:
+      name: priceMax
+      in: query
+      description: >
+        Keeps releases with a listing priced at most this much, in `currency`
+        (required with it). Seller endpoints only. Both ends together match one
+        listing within the range.
+      schema: { type: number, minimum: 0 }
+    Currency:
+      name: currency
+      in: query
+      description: >
+        The currency of priceMin and priceMax. On the facets it also picks the
+        currency of the price buckets (default: the seller's most common one).
+        Prices are not converted: listings in other currencies never match.
+      schema: { type: string, example: EUR }
   schemas:
     ErrorDto:
       type: object
@@ -997,22 +1114,92 @@ components:
           type: integer
           description: How many of enrichedCount are faded for the user. Ignores filters.
 
-    SellerInventoryFacetsDto:
+    FacetValueDto:
       type: object
+      required: [value, count]
+      properties:
+        value: { type: string }
+        count:
+          type: integer
+          description: How many of the releases matching the filters carry the value.
+
+    ReleaseFacetsDto:
+      type: object
+      description: >
+        The values of each category among the releases matching the filters, most
+        common first (ties alphabetical). Values no matching release carries are left out.
       required: [genres, styles, formats, countries]
       properties:
         genres:
           type: array
-          items: { type: string }
+          items: { $ref: "#/components/schemas/FacetValueDto" }
         styles:
           type: array
-          items: { type: string }
+          items: { $ref: "#/components/schemas/FacetValueDto" }
         formats:
           type: array
-          items: { type: string }
+          items: { $ref: "#/components/schemas/FacetValueDto" }
         countries:
           type: array
-          items: { type: string }
+          items: { $ref: "#/components/schemas/FacetValueDto" }
+
+    PriceCurrencyDto:
+      type: object
+      required: [currency, count]
+      properties:
+        currency:
+          type: string
+          example: EUR
+        count:
+          type: integer
+          description: How many of the seller's releases have a listing in the currency.
+
+    PriceBucketDto:
+      type: object
+      description: >
+        A price range, inclusive at both ends, so it can be sent as priceMin and
+        priceMax. A bucket ends one cent below the start of the next.
+      required: [min, max, count]
+      properties:
+        min:
+          type: number
+          nullable: true
+          description: Null for the first bucket, which has no lower end.
+        max:
+          type: number
+          nullable: true
+          description: Null for the last bucket, which has no upper end.
+        count:
+          type: integer
+          description: >
+            How many releases matching every filter but price have a listing in the
+            range.
+
+    SellerInventoryFacetsDto:
+      allOf:
+        - $ref: "#/components/schemas/ReleaseFacetsDto"
+        - type: object
+          required: [currencies, currency, priceBuckets]
+          properties:
+            currencies:
+              type: array
+              description: >
+                Every currency the seller has active listings in, most common first.
+                Ignores the filters.
+              items: { $ref: "#/components/schemas/PriceCurrencyDto" }
+            currency:
+              type: string
+              nullable: true
+              description: >
+                The currency of priceBuckets: the currency param, else the most common
+                one. Null when the seller has no listings.
+            priceBuckets:
+              type: array
+              description: >
+                Up to six price ranges in `currency` with 1-2-5 boundaries from the
+                seller's whole inventory, counted among the releases matching every
+                filter but price.
+              items: { $ref: "#/components/schemas/PriceBucketDto" }
 
     FadeRequestDto:
       type: object

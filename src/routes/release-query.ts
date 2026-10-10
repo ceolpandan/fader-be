@@ -1,7 +1,7 @@
 import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Request } from "express";
-import { releases } from "../db/schema";
+import { releases, sellerListings } from "../db/schema";
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
@@ -70,6 +70,37 @@ export interface ReleaseQuery {
   filters: SQL[];
   /** ORDER BY terms, with the release id as the final tie-break. */
   orderBy: SQL[];
+  /** The price range, when `priceMin` or `priceMax` is given. Only seller endpoints have listings to apply it to. */
+  price: PriceRange | null;
+  /** The `currency` param: the currency of the price range, and of the price buckets in the facets. */
+  currency: string | null;
+}
+
+/** A range of listing prices, inclusive at both ends, in one currency. */
+export interface PriceRange {
+  min?: number | undefined;
+  max?: number | undefined;
+  currency: string;
+}
+
+/** Matches a release when any of the seller's listings of it is in the price range. */
+export function priceFilterSql(username: string, price: PriceRange): SQL {
+  const conditions = [
+    sql`${sellerListings.sellerUsername} = ${username}`,
+    sql`${sellerListings.releaseId} = ${releases.id}`,
+    sql`${sellerListings.currency} = ${price.currency}`,
+  ];
+  if (price.min !== undefined) conditions.push(sql`${sellerListings.price} >= ${price.min}`);
+  if (price.max !== undefined) conditions.push(sql`${sellerListings.price} <= ${price.max}`);
+  return sql`EXISTS (SELECT 1 FROM ${sellerListings} WHERE ${sql.join(conditions, sql` AND `)})`;
+}
+
+function parseOptionalPrice(value: unknown, name: string): { value?: number; error?: string } {
+  if (value === undefined) return {};
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0
+    ? { value: parsed }
+    : { error: `${name} must be a non-negative number` };
 }
 
 function parseOptionalInt(value: unknown, name: string): { value?: number; error?: string } {
@@ -89,6 +120,16 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   if (yearMin.error) return { error: yearMin.error };
   const yearMax = parseOptionalInt(req.query.yearMax, "yearMax");
   if (yearMax.error) return { error: yearMax.error };
+
+  const priceMin = parseOptionalPrice(req.query.priceMin, "priceMin");
+  if (priceMin.error) return { error: priceMin.error };
+  const priceMax = parseOptionalPrice(req.query.priceMax, "priceMax");
+  if (priceMax.error) return { error: priceMax.error };
+  const currency = typeof req.query.currency === "string" && req.query.currency ? req.query.currency : null;
+  const hasPrice = priceMin.value !== undefined || priceMax.value !== undefined;
+  if (hasPrice && currency === null) return { error: "currency is required with priceMin or priceMax" };
+  const price: PriceRange | null =
+    hasPrice && currency !== null ? { min: priceMin.value, max: priceMax.value, currency } : null;
 
   const sortParam = (req.query.sort as string | undefined) ?? "title";
   if (!SORT_OPTIONS.includes(sortParam)) {
@@ -134,38 +175,5 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   const nullsLast = sortField === "rating" ? [sql`${orderExpr} IS NULL`] : [];
   const orderBy = [...nullsLast, isDescending ? desc(orderExpr) : asc(orderExpr), sql`${releases.id}`];
 
-  return { query: { page, pageSize, filters, orderBy } };
-}
-
-/** The `genre` query param of a facets request: the genres that narrow the offered styles. */
-export function parseFacetGenres(req: Request): string[] {
-  return parseCommaSeparated(req.query.genre);
-}
-
-/**
- * Distinct genres, styles, format names and countries of the given release rows, sorted. With
- * `styleGenres`, styles come only from releases that have one of those genres.
- */
-export function collectFacets(
-  rows: { genres: string[]; styles: string[]; formats: { name: string }[]; country: string | null }[],
-  styleGenres: string[] = [],
-) {
-  const genres = new Set<string>();
-  const styles = new Set<string>();
-  const formats = new Set<string>();
-  const countries = new Set<string>();
-  for (const row of rows) {
-    for (const g of row.genres) genres.add(g);
-    if (styleGenres.length === 0 || row.genres.some((g) => styleGenres.includes(g))) {
-      for (const s of row.styles) styles.add(s);
-    }
-    for (const f of row.formats) formats.add(f.name);
-    if (row.country) countries.add(row.country);
-  }
-  return {
-    genres: [...genres].sort(),
-    styles: [...styles].sort(),
-    formats: [...formats].sort(),
-    countries: [...countries].sort(),
-  };
+  return { query: { page, pageSize, filters, orderBy, price, currency } };
 }

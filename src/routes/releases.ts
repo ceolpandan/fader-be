@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "../db/client";
 import { isFadedFor, isNotFadedFor } from "../db/fades";
 import { releases } from "../db/schema";
-import type { ReleaseListPageDto, SellerInventoryFacetsDto } from "../dto/seller.dto";
+import type { ReleaseFacetsDto, ReleaseListPageDto } from "../dto/seller.dto";
 import { mapReleaseRowToDto } from "../dto/mappers";
 import {
   NonRetryableError,
@@ -13,7 +13,8 @@ import {
   type DiscogsQueue,
 } from "../queue/discogs-queue";
 import { logger } from "../util/logger";
-import { collectFacets, parseFacetGenres, parseReleaseQuery } from "./release-query";
+import { countFacets } from "./facets";
+import { parseReleaseQuery } from "./release-query";
 
 export interface ReleasesRouterDeps {
   db: Db;
@@ -70,6 +71,11 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       .all()[0]!.count;
 
   router.get("/facets", (req, res) => {
+    const parsed = parseReleaseQuery(req);
+    if ("error" in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
     const rows = deps.db
       .select({
         genres: releases.genres,
@@ -78,9 +84,9 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
         country: releases.country,
       })
       .from(releases)
-      .where(isNotFadedFor(req.user!.uid))
+      .where(and(isNotFadedFor(req.user!.uid), ...parsed.query.filters))
       .all();
-    const dto: SellerInventoryFacetsDto = collectFacets(rows, parseFacetGenres(req));
+    const dto: ReleaseFacetsDto = countFacets(rows);
     res.json(dto);
   });
 

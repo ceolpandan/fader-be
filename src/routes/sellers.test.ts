@@ -1246,56 +1246,215 @@ describe("sellers routes", () => {
   });
 
   describe("GET /sellers/:username/inventory/facets", () => {
-    it("returns distinct genres, styles, format names, and countries across the seller's full inventory", async () => {
-      db.insert(releases)
-        .values([
-          {
-            id: 1,
-            title: "R1",
-            year: 2000,
-            country: "UK",
-            genres: ["Rock", "Pop"],
-            styles: ["Prog Rock"],
-            formats: [{ name: "Vinyl", descriptions: ["LP"] }],
-            labelIds: [],
-            artists: [],
-          },
-          {
-            id: 2,
-            title: "R2",
-            year: 2001,
-            country: "US",
-            genres: ["Rock"],
-            styles: ["Indie Rock"],
-            formats: [{ name: "CD", descriptions: [] }],
-            labelIds: [],
-            artists: [],
-          },
-        ])
+    const now = new Date();
+    const seedRelease = (
+      id: number,
+      overrides: Partial<{ country: string; genres: string[]; styles: string[]; formats: string[] }> = {},
+    ) =>
+      db
+        .insert(releases)
+        .values({
+          id,
+          title: `R${id}`,
+          year: 2000,
+          country: overrides.country ?? null,
+          genres: overrides.genres ?? [],
+          styles: overrides.styles ?? [],
+          formats: (overrides.formats ?? []).map((name) => ({ name, descriptions: [] })),
+          labelIds: [],
+          artists: [],
+        })
         .run();
-
-      const now = new Date();
-      db.insert(sellerInventory)
-        .values([
-          { sellerUsername: "some-seller", releaseId: 1, status: "active", firstSeenAt: now, lastSeenAt: now, soldAt: null },
-          { sellerUsername: "some-seller", releaseId: 2, status: "sold", firstSeenAt: now, lastSeenAt: now, soldAt: now },
-        ])
+    const seedInventory = (releaseId: number, status: "active" | "sold" = "active") =>
+      db
+        .insert(sellerInventory)
+        .values({
+          sellerUsername: "some-seller",
+          releaseId,
+          status,
+          firstSeenAt: now,
+          lastSeenAt: now,
+          soldAt: status === "sold" ? now : null,
+        })
         .run();
+    const seedListing = (listingId: number, releaseId: number, price: number, currency = "EUR") =>
+      db
+        .insert(sellerListings)
+        .values({
+          listingId,
+          sellerUsername: "some-seller",
+          releaseId,
+          mediaCondition: "Near Mint (NM or M-)",
+          sleeveCondition: null,
+          price,
+          currency,
+          lastSeenAt: now,
+        })
+        .run();
+    const facets = (query = "") => authedRequest(app).get(`/sellers/some-seller/inventory/facets${query}`);
 
-      const res = await authedRequest(app).get("/sellers/some-seller/inventory/facets");
+    it("counts the releases behind each genre, style, format and country of the for-sale inventory", async () => {
+      seedRelease(1, { country: "UK", genres: ["Rock", "Pop"], styles: ["Prog Rock"], formats: ["Vinyl", "Vinyl"] });
+      seedRelease(2, { country: "UK", genres: ["Rock"], styles: ["Indie Rock"], formats: ["CD"] });
+      seedRelease(3, { country: "US", genres: ["Jazz"], styles: ["Bop"], formats: ["CD"] });
+      seedInventory(1);
+      seedInventory(2);
+      seedInventory(3, "sold");
+
+      const res = await facets();
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({
-        genres: ["Pop", "Rock"],
-        styles: ["Indie Rock", "Prog Rock"],
-        formats: ["CD", "Vinyl"],
-        countries: ["UK", "US"],
+      expect(res.body).toMatchObject({
+        genres: [
+          { value: "Rock", count: 2 },
+          { value: "Pop", count: 1 },
+        ],
+        styles: [
+          { value: "Indie Rock", count: 1 },
+          { value: "Prog Rock", count: 1 },
+        ],
+        formats: [
+          { value: "CD", count: 1 },
+          { value: "Vinyl", count: 1 },
+        ],
+        countries: [{ value: "UK", count: 2 }],
       });
     });
 
-    it("returns empty arrays for a seller with no inventory", async () => {
-      const res = await authedRequest(app).get("/sellers/unknown-seller/inventory/facets");
+    it("counts only the releases matching the filters, like the inventory rows", async () => {
+      seedRelease(1, { genres: ["Rock", "Pop"], styles: ["Prog Rock"] });
+      seedRelease(2, { genres: ["Rock"], styles: ["Indie Rock"] });
+      seedRelease(3, { genres: ["Jazz"], styles: ["Bop"] });
+      [1, 2, 3].forEach((id) => seedInventory(id));
+
+      const res = await facets("?genre=Pop");
+      expect(res.body.genres).toEqual([
+        { value: "Pop", count: 1 },
+        { value: "Rock", count: 1 },
+      ]);
+      expect(res.body.styles).toEqual([{ value: "Prog Rock", count: 1 }]);
+    });
+
+    it("returns empty lists for a seller with no inventory", async () => {
+      const res = await facets();
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ genres: [], styles: [], formats: [], countries: [] });
+      expect(res.body).toEqual({
+        genres: [],
+        styles: [],
+        formats: [],
+        countries: [],
+        currencies: [],
+        currency: null,
+        priceBuckets: [],
+      });
+    });
+
+    it("rejects an invalid filter", async () => {
+      expect((await facets("?priceMin=-1&currency=EUR")).status).toBe(400);
+      expect((await facets("?priceMin=5")).status).toBe(400);
+    });
+
+    describe("price", () => {
+      beforeEach(() => {
+        // Ten releases, each with one EUR listing at 3, 6, 9 ... 30; release 1 also lists in USD.
+        for (let id = 1; id <= 10; id++) {
+          seedRelease(id, { genres: [id <= 5 ? "Techno" : "House"] });
+          seedInventory(id);
+          seedListing(id, id, id * 3);
+        }
+        seedListing(100, 1, 2000, "USD");
+      });
+
+      it("lists the currencies, most common first, and defaults to the first", async () => {
+        const res = await facets();
+        expect(res.body.currencies).toEqual([
+          { currency: "EUR", count: 10 },
+          { currency: "USD", count: 1 },
+        ]);
+        expect(res.body.currency).toBe("EUR");
+      });
+
+      it("offers up to six buckets with 1-2-5 boundaries that together hold every release", async () => {
+        const { priceBuckets } = (await facets()).body as {
+          priceBuckets: { min: number | null; max: number | null; count: number }[];
+        };
+        expect(priceBuckets.length).toBeGreaterThan(1);
+        expect(priceBuckets.length).toBeLessThanOrEqual(6);
+        expect(priceBuckets[0]!.min).toBeNull();
+        expect(priceBuckets.at(-1)!.max).toBeNull();
+        expect(priceBuckets.reduce((sum, b) => sum + b.count, 0)).toBe(10);
+        for (const bucket of priceBuckets.slice(1)) expect([1, 2, 5]).toContain(Number(String(bucket.min)[0]));
+      });
+
+      it("makes a bucket's ends select exactly the releases it counts", async () => {
+        const { priceBuckets } = (await facets()).body as {
+          priceBuckets: { min: number | null; max: number | null; count: number }[];
+        };
+        for (const { min, max, count } of priceBuckets) {
+          const params = new URLSearchParams({ currency: "EUR" });
+          if (min !== null) params.set("priceMin", String(min));
+          if (max !== null) params.set("priceMax", String(max));
+          const res = await authedRequest(app).get(`/sellers/some-seller/inventory?${params}`);
+          expect(res.body.total).toBe(count);
+        }
+      });
+
+      it("uses the requested currency for the buckets", async () => {
+        const res = await facets("?currency=USD");
+        expect(res.body.currency).toBe("USD");
+        expect(res.body.priceBuckets.reduce((sum: number, b: { count: number }) => sum + b.count, 0)).toBe(1);
+      });
+
+      it("narrows the counts to the price range but not the buckets", async () => {
+        const res = await facets("?priceMin=3&priceMax=15&currency=EUR");
+        expect(res.body.genres).toEqual([
+          { value: "Techno", count: 5 },
+        ]);
+        expect(res.body.priceBuckets.reduce((sum: number, b: { count: number }) => sum + b.count, 0)).toBe(10);
+      });
+
+      it("narrows the buckets to the other filters", async () => {
+        const res = await facets("?genre=House&currency=EUR");
+        expect(res.body.priceBuckets.reduce((sum: number, b: { count: number }) => sum + b.count, 0)).toBe(5);
+        expect(res.body.currencies[0]).toEqual({ currency: "EUR", count: 10 });
+      });
+    });
+  });
+
+  describe("GET /sellers/:username/inventory price filter", () => {
+    it("matches a release when any of its listings is in range, in the given currency", async () => {
+      const now = new Date();
+      db.insert(releases)
+        .values([1, 2].map((id) => ({ id, title: `R${id}`, year: 2000, genres: [], styles: [], formats: [], labelIds: [], artists: [] })))
+        .run();
+      db.insert(sellerInventory)
+        .values(
+          [1, 2].map((releaseId) => ({
+            sellerUsername: "some-seller",
+            releaseId,
+            status: "active" as const,
+            firstSeenAt: now,
+            lastSeenAt: now,
+            soldAt: null,
+          })),
+        )
+        .run();
+      db.insert(sellerListings)
+        .values([
+          { listingId: 1, releaseId: 1, price: 5, currency: "EUR" },
+          { listingId: 2, releaseId: 1, price: 30, currency: "EUR" },
+          { listingId: 3, releaseId: 2, price: 25, currency: "USD" },
+        ].map((l) => ({ ...l, sellerUsername: "some-seller", mediaCondition: "Mint (M)", sleeveCondition: null, lastSeenAt: now })))
+        .run();
+
+      const ids = async (query: string) =>
+        ((await authedRequest(app).get(`/sellers/some-seller/inventory?${query}`)).body.items as { releaseId: number }[]).map(
+          (i) => i.releaseId,
+        );
+
+      expect(await ids("priceMin=20&priceMax=40&currency=EUR")).toEqual([1]);
+      expect(await ids("priceMin=20&currency=USD")).toEqual([2]);
+      expect(await ids("priceMax=4&currency=EUR")).toEqual([]);
+      expect((await authedRequest(app).get("/sellers/some-seller/inventory?priceMax=4")).status).toBe(400);
     });
   });
 });

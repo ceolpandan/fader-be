@@ -132,11 +132,40 @@ export interface SellerInventoryPageDto {
   fadedCount: number;
 }
 
-export interface SellerInventoryFacetsDto {
-  genres: string[];
-  styles: string[];
-  formats: string[];
-  countries: string[];
+/** A facet value with how many of the releases matching the current filters carry it. */
+export interface FacetValueDto {
+  value: string;
+  count: number;
+}
+
+/** A currency a seller lists in, with how many of their releases have a listing in it. */
+export interface PriceCurrencyDto {
+  currency: string;
+  count: number;
+}
+
+/** A price range with how many releases have a listing in it; a null end is open. Ends are inclusive. */
+export interface PriceBucketDto {
+  min: number | null;
+  max: number | null;
+  count: number;
+}
+
+/** The values of each category among the releases matching the filters, most common first. */
+export interface ReleaseFacetsDto {
+  genres: FacetValueDto[];
+  styles: FacetValueDto[];
+  formats: FacetValueDto[];
+  countries: FacetValueDto[];
+}
+
+export interface SellerInventoryFacetsDto extends ReleaseFacetsDto {
+  /** Every currency the seller lists in, most common first; ignores the filters. */
+  currencies: PriceCurrencyDto[];
+  /** The currency of `priceBuckets`: the `currency` param, else the most common one. Null with no listings. */
+  currency: string | null;
+  /** Up to six price ranges in `currency`, counted among releases matching every filter but price. */
+  priceBuckets: PriceBucketDto[];
 }
 
 /** A row of `GET /releases`: a seller inventory item without the seller-specific fields. */
