@@ -264,13 +264,16 @@ paths:
     post:
       operationId: fade
       summary: >
-        Fade a release or a master for the signed-in user. Answers at once; any
-        release or master can be faded, indexed or not. A release with a known
-        master is stored as that master, hiding every version under it. Any
-        other release is stored as itself, and a background lookup (queued
-        ahead of scans and enrichment) upgrades it to its master and stores
-        the master's versions. lookupStatus tells where that stands. Fading a
-        failed fade again retries its lookup. Otherwise idempotent.
+        Fade a release or a master for the signed-in user. Any release or
+        master can be faded, indexed or not. A release with a known master is
+        stored as that master, hiding every version under it. Any other
+        release is stored as itself, and a lookup (queued ahead of scans and
+        enrichment) upgrades it to its master and stores the master's
+        versions. The request waits for that lookup (up to about 20 seconds),
+        so the answer names the fade and counts what it hides. If the wait
+        runs out, or Discogs is paused, lookupStatus is pending, versionCount
+        is null and the lookup carries on in the background. Fading a failed
+        fade again retries its lookup. Otherwise idempotent.
       requestBody:
         required: true
         content:
@@ -1269,7 +1272,7 @@ components:
 
     FadeResponseDto:
       type: object
-      required: [kind, id, lookupStatus]
+      required: [kind, id, lookupStatus, title, artists, versionCount]
       properties:
         kind:
           type: string
@@ -1283,6 +1286,19 @@ components:
             pending until the master and its versions are known, done once they
             are (or the release has no master), failed when Discogs could not
             resolve it.
+        title:
+          type: string
+          nullable: true
+          description: The title of the faded release or master, when known.
+        artists:
+          type: array
+          items: { $ref: "#/components/schemas/ReleaseArtistStub" }
+        versionCount:
+          type: integer
+          nullable: true
+          description: >
+            Releases the fade hides: the master's versions, or 1 for a release
+            without a master. Null unless lookupStatus is done.
 
     SettingsDto:
       type: object

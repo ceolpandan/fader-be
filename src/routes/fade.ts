@@ -9,6 +9,7 @@ import {
   releases,
   sellerInventory,
   type FadeKind,
+  type FadeLookupStatus,
   type ReleaseArtistStub,
   type ReleaseDetailPayload,
 } from "../db/schema";
@@ -19,14 +20,21 @@ import type {
   FadeRequestDto,
   FadeResponseDto,
 } from "../dto/fade.dto";
-import { enqueueFadeLookup, hasStoredVersions } from "../indexing/fade-lookup-handler";
+import { enqueueFadeLookup, hasStoredVersions, takeUpgradedMaster } from "../indexing/fade-lookup-handler";
 import type { DiscogsQueue } from "../queue/discogs-queue";
 import { highlightId, logger } from "../util/logger";
 
 export interface FadeRouterDeps {
   db: Db;
   queue: DiscogsQueue;
+  fadeLookupWaitMs?: number;
 }
+
+/** How long a fade request waits for its lookup; two Discogs calls at queue pacing take a few seconds. */
+const DEFAULT_LOOKUP_WAIT_MS = 20_000;
+const LOOKUP_POLL_MS = 200;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Reads exactly one integer id from `releaseId` or `masterId`; `error` is the 400 message. */
 function parseFadeRequest(
@@ -251,7 +259,79 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
     res.set("Cache-Control", "no-store").json(dto);
   });
 
-  router.post("/", (req, res) => {
+  /** What the toast needs to name a fade: its title and artists, and how many releases it hides. */
+  function describeFade(
+    uid: string,
+    kind: FadeKind,
+    id: number,
+    lookupStatus: FadeLookupStatus,
+  ): FadeResponseDto {
+    const [fade] = deps.db
+      .select({ title: fades.title, artists: fades.artists })
+      .from(fades)
+      .where(and(eq(fades.uid, uid), eq(fades.kind, kind), eq(fades.id, id)))
+      .all();
+    const [indexed] = deps.db
+      .select({ title: releases.title, artists: releases.artists })
+      .from(releases)
+      .where(kind === "master" ? eq(releases.masterId, id) : eq(releases.id, id))
+      .orderBy(releases.id)
+      .limit(1)
+      .all();
+
+    let versionCount: number | null = null;
+    if (lookupStatus === "done") {
+      versionCount =
+        kind === "release"
+          ? 1
+          : deps.db
+              .select({ count: sql<number>`count(*)` })
+              .from(masterVersions)
+              .where(eq(masterVersions.masterId, id))
+              .get()!.count;
+    }
+    return {
+      kind,
+      id,
+      lookupStatus,
+      title: indexed?.title ?? fade?.title ?? null,
+      artists: indexed?.artists ?? fade?.artists ?? [],
+      versionCount,
+    };
+  }
+
+  /**
+   * Waits until the lookup of `uid`'s fade settles, following a release fade as the lookup
+   * upgrades it to its master. Gives up as `pending` at the deadline, or at once while Discogs is
+   * paused; the lookup carries on in the background either way.
+   */
+  async function awaitLookup(
+    uid: string,
+    start: { kind: FadeKind; id: number },
+  ): Promise<{ kind: FadeKind; id: number; lookupStatus: FadeLookupStatus }> {
+    const deadline = Date.now() + (deps.fadeLookupWaitMs ?? DEFAULT_LOOKUP_WAIT_MS);
+    let current = start;
+    for (;;) {
+      const [row] = deps.db
+        .select({ lookupStatus: fades.lookupStatus })
+        .from(fades)
+        .where(and(eq(fades.uid, uid), eq(fades.kind, current.kind), eq(fades.id, current.id)))
+        .all();
+
+      if (!row) {
+        // The release lookup replaced this fade with its master's; anything else means it was unfaded.
+        const masterId = current.kind === "release" ? takeUpgradedMaster(uid, current.id) : undefined;
+        if (masterId === undefined) return { ...current, lookupStatus: "pending" };
+        current = { kind: "master", id: masterId };
+        continue;
+      }
+      if (row.lookupStatus !== "pending") return { ...current, lookupStatus: row.lookupStatus };
+      if (Date.now() >= deadline || deps.queue.getPause()) return { ...current, lookupStatus: "pending" };
+      await sleep(LOOKUP_POLL_MS);
+    }
+  }
+
+  router.post("/", async (req, res) => {
     const parsed = parseFadeRequest((req.body ?? {}) as Partial<FadeRequestDto>);
     if ("error" in parsed) {
       res.status(400).json({ error: parsed.error });
@@ -266,26 +346,28 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
       .where(and(eq(fades.uid, uid), eq(fades.kind, target.kind), eq(fades.id, target.id)))
       .all();
 
-    // A pending or done fade needs nothing more; a failed one is retried by fading again.
+    // A done fade needs nothing more, and a pending one already has its lookup queued; a failed
+    // one is retried by fading again.
+    let lookupStatus: FadeLookupStatus;
     if (existing && existing.lookupStatus !== "failed") {
-      const dto: FadeResponseDto = { kind: target.kind, id: target.id, lookupStatus: existing.lookupStatus };
-      res.json(dto);
-      return;
+      lookupStatus = existing.lookupStatus;
+    } else {
+      const needsLookup =
+        target.kind === "master" ? !hasStoredVersions(deps.db, target.id) : !target.resolved;
+      lookupStatus = needsLookup ? "pending" : "done";
+
+      deps.db
+        .insert(fades)
+        .values({ uid, kind: target.kind, id: target.id, createdAt: new Date(), lookupStatus })
+        .onConflictDoUpdate({ target: [fades.uid, fades.kind, fades.id], set: { lookupStatus } })
+        .run();
+      if (needsLookup) enqueueFadeLookup((job) => deps.queue.enqueue(job), uid, target.kind, target.id);
+      logger.info(`Faded ${target.kind} ${highlightId(target.id)}`);
     }
 
-    const needsLookup = target.kind === "master" ? !hasStoredVersions(deps.db, target.id) : !target.resolved;
-    const lookupStatus = needsLookup ? "pending" : "done";
-
-    deps.db
-      .insert(fades)
-      .values({ uid, kind: target.kind, id: target.id, createdAt: new Date(), lookupStatus })
-      .onConflictDoUpdate({ target: [fades.uid, fades.kind, fades.id], set: { lookupStatus } })
-      .run();
-    if (needsLookup) enqueueFadeLookup((job) => deps.queue.enqueue(job), uid, target.kind, target.id);
-
-    logger.info(`Faded ${target.kind} ${highlightId(target.id)}`);
-    const dto: FadeResponseDto = { kind: target.kind, id: target.id, lookupStatus };
-    res.json(dto);
+    const settled =
+      lookupStatus === "pending" ? await awaitLookup(uid, target) : { ...target, lookupStatus };
+    res.json(describeFade(uid, settled.kind, settled.id, settled.lookupStatus));
   });
 
   router.delete("/", (req, res) => {

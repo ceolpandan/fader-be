@@ -23,6 +23,8 @@ export interface AppDeps {
   queue: DiscogsQueue;
   /** Direct Discogs reads for the seller preview; defaults to the real client. */
   discogs?: DiscogsReads;
+  /** How long `POST /fade` waits for the fade's lookup before answering `pending`. */
+  fadeLookupWaitMs?: number;
 }
 
 export function createApp(deps: AppDeps): Express {

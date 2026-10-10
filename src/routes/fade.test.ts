@@ -8,7 +8,9 @@ import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs, fades, masterVersions, releases, sellerInventory } from "../db/schema";
+import { createFadeLookupHandler } from "../indexing/fade-lookup-handler";
 import { DiscogsQueue, INLINE_PRIORITY } from "../queue/discogs-queue";
+import type { DiscogsRelease } from "../types/discogs-api";
 import { createApp } from "../app";
 
 const { verifyIdToken } = vi.hoisted(() => ({ verifyIdToken: vi.fn() }));
@@ -87,7 +89,7 @@ describe("fade", () => {
     db = createDb(dbPath);
     migrate(db, { migrationsFolder: "./drizzle" });
     queue = new DiscogsQueue(db);
-    app = createApp({ db, queue });
+    app = createApp({ db, queue, fadeLookupWaitMs: 300 });
 
     process.env.FIREBASE_PROJECT_ID = "test-project";
     process.env.FIREBASE_CLIENT_EMAIL = "test@test-project.iam.gserviceaccount.com";
@@ -111,7 +113,14 @@ describe("fade", () => {
       const res = await asUser(app, "u1").post("/fade").send({ releaseId: 111 });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ kind: "master", id: 900, lookupStatus: "pending" });
+      expect(res.body).toEqual({
+        kind: "master",
+        id: 900,
+        lookupStatus: "pending",
+        title: "Release 111",
+        artists: [],
+        versionCount: null,
+      });
       expect(db.select().from(fades).all()).toMatchObject([{ uid: "u1", kind: "master", id: 900 }]);
     });
 
@@ -120,14 +129,28 @@ describe("fade", () => {
 
       const res = await asUser(app, "u1").post("/fade").send({ releaseId: 555 });
 
-      expect(res.body).toEqual({ kind: "release", id: 555, lookupStatus: "done" });
+      expect(res.body).toEqual({
+        kind: "release",
+        id: 555,
+        lookupStatus: "done",
+        title: "Release 555",
+        artists: [],
+        versionCount: 1,
+      });
       expect(lookupJobs()).toEqual([]);
     });
 
     it("stores a master directly", async () => {
       const res = await asUser(app, "u1").post("/fade").send({ masterId: 900 });
 
-      expect(res.body).toEqual({ kind: "master", id: 900, lookupStatus: "pending" });
+      expect(res.body).toEqual({
+        kind: "master",
+        id: 900,
+        lookupStatus: "pending",
+        title: null,
+        artists: [],
+        versionCount: null,
+      });
     });
 
     it("is idempotent", async () => {
@@ -145,7 +168,7 @@ describe("fade", () => {
       const res = await asUser(app, "u1").post("/fade").send({ releaseId: 999 });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ kind: "release", id: 999, lookupStatus: "pending" });
+      expect(res.body).toMatchObject({ kind: "release", id: 999, lookupStatus: "pending" });
       expect(lookupJobs()).toMatchObject([
         {
           runId: "fade:u1:999",
@@ -167,7 +190,7 @@ describe("fade", () => {
 
       const res = await asUser(app, "u2").post("/fade").send({ masterId: 900 });
 
-      expect(res.body).toEqual({ kind: "master", id: 900, lookupStatus: "done" });
+      expect(res.body).toMatchObject({ kind: "master", id: 900, lookupStatus: "done", versionCount: 1 });
       expect(lookupJobs()).toEqual([]);
     });
 
@@ -176,7 +199,7 @@ describe("fade", () => {
 
       const res = await asUser(app, "u1").post("/fade").send({ releaseId: 111 });
 
-      expect(res.body).toEqual({ kind: "master", id: 900, lookupStatus: "done" });
+      expect(res.body).toMatchObject({ kind: "master", id: 900, lookupStatus: "done" });
     });
 
     it("retries a failed lookup when the item is faded again", async () => {
@@ -186,8 +209,101 @@ describe("fade", () => {
 
       const res = await asUser(app, "u1").post("/fade").send({ releaseId: 999 });
 
-      expect(res.body).toEqual({ kind: "release", id: 999, lookupStatus: "pending" });
+      expect(res.body).toMatchObject({ kind: "release", id: 999, lookupStatus: "pending" });
       expect(lookupJobs()).toHaveLength(1);
+    });
+
+    describe("waiting for the lookup", () => {
+      const discogsRelease = (masterId: number): DiscogsRelease =>
+        ({
+          title: "Cosmic Slop",
+          master_id: masterId,
+          artists: [{ id: 7, name: "Funkadelic" }],
+        }) as DiscogsRelease;
+
+      /** Runs every queued fade lookup through the real handler, with Discogs stubbed. */
+      function runLookupsWith(
+        getRelease: (id: number) => Promise<DiscogsRelease>,
+        getMasterVersionReleaseIds: (id: number) => Promise<number[]>,
+      ) {
+        const handler = createFadeLookupHandler({
+          db,
+          enqueue: (job) => queue.enqueue(job),
+          getRelease,
+          getMasterVersionReleaseIds,
+        });
+        const enqueue = queue.enqueue.bind(queue);
+        vi.spyOn(queue, "enqueue").mockImplementation((job) => {
+          const id = enqueue(job);
+          if (job.type === "fade_lookup") {
+            setTimeout(() => {
+              handler(job.payload as never, { runId: job.runId, jobId: id }).catch(() => {
+                db.update(fades).set({ lookupStatus: "failed" }).run();
+              });
+            }, 20);
+          }
+          return id;
+        });
+      }
+
+      it("names the release and counts the other versions once a release is upgraded to its master", async () => {
+        runLookupsWith(
+          async () => discogsRelease(900),
+          async () => [111, 112, 113, 114],
+        );
+
+        const res = await asUser(app, "u1").post("/fade").send({ releaseId: 111 });
+
+        expect(res.body).toEqual({
+          kind: "master",
+          id: 900,
+          lookupStatus: "done",
+          title: "Cosmic Slop",
+          artists: [{ id: 7, name: "Funkadelic" }],
+          versionCount: 4,
+        });
+        expect(lookupJobs()).toHaveLength(2);
+      });
+
+      it("counts a release without a master as one", async () => {
+        runLookupsWith(
+          async () => discogsRelease(0),
+          async () => [],
+        );
+
+        const res = await asUser(app, "u1").post("/fade").send({ releaseId: 999 });
+
+        expect(res.body).toMatchObject({
+          kind: "release",
+          id: 999,
+          lookupStatus: "done",
+          title: "Cosmic Slop",
+          versionCount: 1,
+        });
+      });
+
+      it("answers failed when Discogs cannot resolve the fade", async () => {
+        runLookupsWith(
+          async () => {
+            throw new Error("boom");
+          },
+          async () => [],
+        );
+
+        const res = await asUser(app, "u1").post("/fade").send({ releaseId: 999 });
+
+        expect(res.body).toMatchObject({ kind: "release", id: 999, lookupStatus: "failed", versionCount: null });
+      });
+
+      it("answers pending at once while Discogs is paused", async () => {
+        vi.spyOn(queue, "getPause").mockReturnValue({ retryAt: new Date(Date.now() + 60_000), backoffMs: 60_000 });
+        const started = Date.now();
+
+        const res = await asUser(app, "u1").post("/fade").send({ releaseId: 999 });
+
+        expect(res.body).toMatchObject({ lookupStatus: "pending", versionCount: null });
+        expect(Date.now() - started).toBeLessThan(250);
+      });
     });
 
     it("returns 400 unless exactly one valid id is given", async () => {

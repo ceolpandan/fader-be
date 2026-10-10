@@ -28,6 +28,23 @@ export function fadeLookupRunId(uid: string, id: number): string {
   return `fade:${uid}:${id}`;
 }
 
+/**
+ * Masters that release fades were upgraded to, keyed by uid and release id, until the fade route
+ * that is waiting on the lookup picks them up. Memory only: a lost entry just means that request
+ * answers `pending`.
+ */
+const upgradedMasters = new Map<string, number>();
+
+const upgradeKey = (uid: string, releaseId: number) => `${uid}:${releaseId}`;
+
+/** The master a waiting fade request's release was upgraded to, once; undefined if it wasn't. */
+export function takeUpgradedMaster(uid: string, releaseId: number): number | undefined {
+  const key = upgradeKey(uid, releaseId);
+  const masterId = upgradedMasters.get(key);
+  upgradedMasters.delete(key);
+  return masterId;
+}
+
 /** Queues a lookup for `uid`'s fade; user-driven, so it runs ahead of scans and enrichment. */
 export function enqueueFadeLookup(
   enqueue: (job: EnqueueInput) => number,
@@ -108,6 +125,7 @@ export function createFadeLookupHandler(
           })
           .run();
       });
+      upgradedMasters.set(upgradeKey(uid, id), masterId);
       enqueueFadeLookup(deps.enqueue, uid, "master", masterId);
       return;
     }
