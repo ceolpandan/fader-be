@@ -18,16 +18,11 @@ export interface ReleaseFacetsDto {
 export interface ReleaseListItemDto {
   releaseId: number;
   title: string;
-  thumb: string | null;
   year: number | null;
   country: string | null;
   genres: string[];
   styles: string[];
   formats: ReleaseFormat[];
-  ratingAverage: number | null;
-  ratingCount: number | null;
-  haves: number | null;
-  wants: number | null;
   artists: ReleaseArtistStub[];
 }
 
@@ -37,8 +32,6 @@ export interface ReleaseListPageDto {
   pageSize: number;
   /** Releases matching the current filters (faded ones already excluded). */
   total: number;
-  /** All enriched releases, faded ones included. Ignores filters. */
-  enrichedCount: number;
-  /** How many of `enrichedCount` are faded for the signed-in user. Ignores filters. */
+  /** How many releases the signed-in user has faded. Ignores filters. */
   fadedCount: number;
 }

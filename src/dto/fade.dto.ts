@@ -40,7 +40,6 @@ export interface FadedItemDto {
   title: string | null;
   artists: ReleaseArtistStub[];
   year: number | null;
-  thumb: string | null;
   /** Indexed releases the fade hides: the versions of a master, or 1 for a release. */
   versionsIndexed: number;
   lookupStatus: FadeLookupStatus;

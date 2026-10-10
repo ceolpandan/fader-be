@@ -1,6 +1,6 @@
 # fader-be
 
-Express + SQLite (Drizzle) API that serves enriched Discogs releases and fades to `fader-ui` (sibling repo at `../fader-ui`) and the Discogs Fader extension. Commands and layout: `README.md`.
+Express + SQLite (Drizzle) API that serves Discogs releases and fades to `fader-ui` (sibling repo at `../fader-ui`) and the Discogs Fader extension. Commands and layout: `README.md`.
 
 ## Discogs terms of use
 

@@ -127,6 +127,13 @@
       "when": 1791666476135,
       "tag": "0017_regular_norrin_radd",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1791671613696,
+      "tag": "0018_drop_enrichment",
+      "breakpoints": true
     }
   ]
 }

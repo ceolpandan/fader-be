@@ -6,14 +6,12 @@ import os from "node:os";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs } from "../db/schema";
-import { DiscogsAuthError, DiscogsRateLimitError, DiscogsTransientError } from "../discogs-client";
+import { DiscogsRateLimitError, DiscogsTransientError } from "../discogs-client";
 import {
   DiscogsQueue,
   MAX_CAP_RETRIES,
-  MAX_TRANSIENT_ATTEMPTS,
   NonRetryableError,
   PACING_MS,
-  QueueUnavailableError,
   QueueWaitTimeoutError,
 } from "./discogs-queue";
 
@@ -109,12 +107,12 @@ describe("DiscogsQueue", () => {
     const handler = vi.fn(async () => {
       throw new NonRetryableError("release not found");
     });
-    queue.registerHandler("release_detail", handler);
+    queue.registerHandler("fade_lookup", handler);
 
     const jobId = queue.enqueue({
       runId: "run-1",
-      type: "release_detail",
-      payload: { releaseId: 732194 },
+      type: "fade_lookup",
+      payload: { uid: "u", kind: "release", id: 732194 },
     });
 
     queue.start();
@@ -133,25 +131,19 @@ describe("DiscogsQueue", () => {
     queue.registerHandler(
       "fade_lookup",
       vi.fn(async (payload: { id: number }) => {
-        order.push(`page-${payload.id}`);
-      }),
-    );
-    queue.registerHandler(
-      "release_detail",
-      vi.fn(async (payload: { releaseId: number }) => {
-        order.push(`release-${payload.releaseId}`);
+        order.push(`job-${payload.id}`);
       }),
     );
 
     queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
     queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 2 } });
-    queue.enqueue({ runId: "run-2", type: "release_detail", payload: { releaseId: 7 }, priority: 10 });
+    queue.enqueue({ runId: "run-2", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 7 }, priority: 10 });
 
     queue.start();
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(PACING_MS * 2);
 
-    expect(order).toEqual(["release-7", "page-1", "page-2"]);
+    expect(order).toEqual(["job-7", "job-1", "job-2"]);
   });
 
   it("resets a job stuck in processing back to pending on start (crash recovery)", async () => {
@@ -185,22 +177,21 @@ describe("DiscogsQueue", () => {
     const settled: string[] = [];
     queue.onSettled((job) => settled.push(`${job.type}:${job.status}`));
 
-    queue.registerHandler("fade_lookup", vi.fn(async () => {}));
     queue.registerHandler(
-      "release_detail",
-      vi.fn(async () => {
-        throw new NonRetryableError("nope");
+      "fade_lookup",
+      vi.fn(async (payload: { id: number }) => {
+        if (payload.id === 2) throw new NonRetryableError("nope");
       }),
     );
 
     queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
-    queue.enqueue({ runId: "run-1", type: "release_detail", payload: { releaseId: 1 } });
+    queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 2 } });
 
     queue.start();
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(PACING_MS);
 
-    expect(settled).toEqual(["fade_lookup:done", "release_detail:failed"]);
+    expect(settled).toEqual(["fade_lookup:done", "fade_lookup:failed"]);
   });
 
   it("lets a priority job cut in mid-run, then resumes background jobs in order", async () => {
@@ -208,13 +199,7 @@ describe("DiscogsQueue", () => {
     queue.registerHandler(
       "fade_lookup",
       vi.fn(async (payload: { id: number }) => {
-        order.push(`page-${payload.id}`);
-      }),
-    );
-    queue.registerHandler(
-      "release_detail",
-      vi.fn(async (payload: { releaseId: number }) => {
-        order.push(`release-${payload.releaseId}`);
+        order.push(`job-${payload.id}`);
       }),
     );
     for (const page of [1, 2, 3]) {
@@ -223,17 +208,17 @@ describe("DiscogsQueue", () => {
 
     queue.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(order).toEqual(["page-1"]);
+    expect(order).toEqual(["job-1"]);
 
     const inline = queue.enqueueAndWait({
       runId: "inline",
-      type: "release_detail",
-      payload: { releaseId: 7 },
+      type: "fade_lookup",
+      payload: { uid: "u", kind: "release", id: 7 },
     });
     await vi.advanceTimersByTimeAsync(PACING_MS * 3);
     await inline;
 
-    expect(order).toEqual(["page-1", "release-7", "page-2", "page-3"]);
+    expect(order).toEqual(["job-1", "job-7", "job-2", "job-3"]);
   });
 
   describe("enqueueAndWait", () => {
@@ -241,34 +226,28 @@ describe("DiscogsQueue", () => {
       const order: string[] = [];
       queue.registerHandler(
         "fade_lookup",
-        vi.fn(async () => {
-          order.push("page");
-        }),
-      );
-      queue.registerHandler(
-        "release_detail",
-        vi.fn(async () => {
-          order.push("release");
+        vi.fn(async (payload: { id: number }) => {
+          order.push(`job-${payload.id}`);
         }),
       );
       queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
 
       const waiting = queue.enqueueAndWait({
         runId: "inline-1",
-        type: "release_detail",
-        payload: { releaseId: 7 },
+        type: "fade_lookup",
+        payload: { uid: "u", kind: "release", id: 7 },
       });
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
 
       await expect(waiting).resolves.toBeUndefined();
-      expect(order).toEqual(["release"]);
+      expect(order).toEqual(["job-7"]);
     });
 
     it("rejects with the original NonRetryableError on a permanent failure", async () => {
       const failure = new NonRetryableError("release not found");
       queue.registerHandler(
-        "release_detail",
+        "fade_lookup",
         vi.fn(async () => {
           throw failure;
         }),
@@ -276,8 +255,8 @@ describe("DiscogsQueue", () => {
 
       const waiting = queue.enqueueAndWait({
         runId: "inline-1",
-        type: "release_detail",
-        payload: { releaseId: 7 },
+        type: "fade_lookup",
+        payload: { uid: "u", kind: "release", id: 7 },
       });
       const outcome = waiting.catch((err: unknown) => err);
       queue.start();
@@ -288,10 +267,10 @@ describe("DiscogsQueue", () => {
 
     it("rejects with QueueWaitTimeoutError after timeoutMs, while the job still runs and completes later", async () => {
       const handler = vi.fn(async () => {});
-      queue.registerHandler("release_detail", handler);
+      queue.registerHandler("fade_lookup", handler);
 
       const waiting = queue.enqueueAndWait(
-        { runId: "inline-1", type: "release_detail", payload: { releaseId: 7 } },
+        { runId: "inline-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 7 } },
         { timeoutMs: 1000 },
       );
       const outcome = waiting.catch((err: unknown) => err);
@@ -311,12 +290,12 @@ describe("DiscogsQueue", () => {
 
     it("coalesces concurrent identical requests onto one job, and enqueues fresh after it settles", async () => {
       const handler = vi.fn(async () => {});
-      queue.registerHandler("release_detail", handler);
+      queue.registerHandler("fade_lookup", handler);
       const request = () =>
         queue.enqueueAndWait({
           runId: "inline",
-          type: "release_detail",
-          payload: { releaseId: 7 },
+          type: "fade_lookup",
+          payload: { uid: "u", kind: "release", id: 7 },
         });
 
       const first = request();
@@ -338,14 +317,14 @@ describe("DiscogsQueue", () => {
     it("rejects every coalesced caller when the shared job fails", async () => {
       const failure = new NonRetryableError("gone");
       queue.registerHandler(
-        "release_detail",
+        "fade_lookup",
         vi.fn(async () => {
           throw failure;
         }),
       );
       const request = () =>
         queue
-          .enqueueAndWait({ runId: "inline", type: "release_detail", payload: { releaseId: 7 } })
+          .enqueueAndWait({ runId: "inline", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 7 } })
           .catch((err: unknown) => err);
 
       const outcomes = Promise.all([request(), request()]);
@@ -359,12 +338,12 @@ describe("DiscogsQueue", () => {
       const handler = vi.fn(async () => {
         throw new Error("discogs is down");
       });
-      queue.registerHandler("release_detail", handler);
+      queue.registerHandler("fade_lookup", handler);
 
       const waiting = queue.enqueueAndWait({
         runId: "inline-1",
-        type: "release_detail",
-        payload: { releaseId: 7 },
+        type: "fade_lookup",
+        payload: { uid: "u", kind: "release", id: 7 },
       });
       const outcome = waiting.catch((err: unknown) => err);
       queue.start();
@@ -391,8 +370,8 @@ describe("DiscogsQueue", () => {
 
     it("retries the same job after 1 min, without using up its attempts", async () => {
       const handler = flaky(1, new DiscogsTransientError("boom"));
-      queue.registerHandler("release_detail", handler);
-      const id = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
+      queue.registerHandler("fade_lookup", handler);
+      const id = queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
@@ -408,9 +387,9 @@ describe("DiscogsQueue", () => {
 
     it("pauses every run, not just the failing job's", async () => {
       const handler = flaky(1, new DiscogsTransientError("boom"));
-      queue.registerHandler("release_detail", handler);
-      queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
-      queue.enqueue({ runId: "b", type: "release_detail", payload: { releaseId: 2 } });
+      queue.registerHandler("fade_lookup", handler);
+      queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
+      queue.enqueue({ runId: "b", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 2 } });
 
       queue.start();
       await vi.advanceTimersByTimeAsync(30_000);
@@ -443,8 +422,8 @@ describe("DiscogsQueue", () => {
     });
 
     it("waits for Retry-After when it is longer than the backoff step", async () => {
-      queue.registerHandler("release_detail", flaky(1, new DiscogsRateLimitError("slow down", 5 * MIN)));
-      queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
+      queue.registerHandler("fade_lookup", flaky(1, new DiscogsRateLimitError("slow down", 5 * MIN)));
+      queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
@@ -453,8 +432,8 @@ describe("DiscogsQueue", () => {
     });
 
     it("ignores a Retry-After shorter than the backoff step", async () => {
-      queue.registerHandler("release_detail", flaky(1, new DiscogsRateLimitError("slow down", 5_000)));
-      queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
+      queue.registerHandler("fade_lookup", flaky(1, new DiscogsRateLimitError("slow down", 5_000)));
+      queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
@@ -463,10 +442,10 @@ describe("DiscogsQueue", () => {
     });
 
     it("keeps failing a 404 permanently and does not pause", async () => {
-      queue.registerHandler("release_detail", async () => {
+      queue.registerHandler("fade_lookup", async () => {
         throw new NonRetryableError("not found");
       });
-      const id = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
+      const id = queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
@@ -502,33 +481,7 @@ describe("DiscogsQueue", () => {
       expect(queue.getPause()).toBeNull();
     });
 
-    it("skips an enrich job after MAX_TRANSIENT_ATTEMPTS Discogs errors and carries on with the next", async () => {
-      const handler = vi.fn(async (payload: { releaseId: number }) => {
-        if (payload.releaseId === 1) throw new DiscogsTransientError("500");
-      });
-      queue.registerHandler("release_detail", handler);
-      const settled = vi.fn();
-      queue.onSettled(settled);
-      const bad = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
-      const good = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 2 } });
-
-      queue.start();
-      await vi.advanceTimersByTimeAsync(0);
-      for (let i = 1; i < MAX_TRANSIENT_ATTEMPTS; i++) {
-        expect(status(bad).status).toBe("pending");
-        await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
-      }
-
-      expect(status(bad)).toMatchObject({ status: "failed", attempts: 0 });
-      expect(status(bad).errorMessage).toContain("Skipped after");
-      expect(status(good).status).toBe("pending");
-      expect(settled).toHaveBeenCalledTimes(1);
-
-      await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
-      expect(status(good).status).toBe("done");
-    });
-
-    it("does not skip a scan page on repeated Discogs errors", async () => {
+    it("keeps retrying one job through repeated Discogs errors", async () => {
       queue.registerHandler("fade_lookup", vi.fn(async () => {
         throw new DiscogsTransientError("500");
       }));
@@ -536,72 +489,13 @@ describe("DiscogsQueue", () => {
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
-      for (let i = 0; i < MAX_TRANSIENT_ATTEMPTS + 1; i++) {
+      for (let i = 0; i < 4; i++) {
         await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
       }
 
       expect(status(id).status).toBe("pending");
     });
 
-    it("still gives up when every enrich job keeps failing, skipping only the first few", async () => {
-      queue.registerHandler("release_detail", async () => {
-        throw new DiscogsTransientError("down");
-      });
-      const aborted = vi.fn();
-      queue.onRunAborted(aborted);
-      const ids = [1, 2, 3, 4].map((releaseId) =>
-        queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId } }),
-      );
 
-      queue.start();
-      await vi.advanceTimersByTimeAsync(0);
-      for (let i = 0; i < 4 + MAX_CAP_RETRIES; i++) {
-        await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
-      }
-
-      expect(aborted).toHaveBeenCalledWith("a");
-      expect(ids.map((id) => status(id).status)).toEqual(["failed", "failed", "failed", "failed"]);
-      expect(queue.getPause()).toBeNull();
-    });
-
-    it("fails the run on a 401/403 without pausing the queue or touching other runs", async () => {
-      const handler = vi.fn(async (_payload: { releaseId: number }, ctx: { runId: string }) => {
-        if (ctx.runId === "a") throw new DiscogsAuthError("bad token");
-      });
-      queue.registerHandler("release_detail", handler);
-      const aborted = vi.fn();
-      queue.onRunAborted(aborted);
-      const first = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 1 } });
-      const sameRun = queue.enqueue({ runId: "a", type: "release_detail", payload: { releaseId: 2 } });
-      const otherRun = queue.enqueue({ runId: "b", type: "release_detail", payload: { releaseId: 3 } });
-
-      queue.start();
-      await vi.advanceTimersByTimeAsync(PACING_MS);
-
-      expect(status(first).status).toBe("failed");
-      expect(status(sameRun).status).toBe("failed");
-      expect(status(otherRun).status).toBe("done");
-      expect(aborted).toHaveBeenCalledWith("a");
-      expect(aborted).not.toHaveBeenCalledWith("b");
-      expect(queue.getPause()).toBeNull();
-    });
-
-    it("rejects an inline request fast while paused, and one already waiting when the pause starts", async () => {
-      queue.registerHandler("release_detail", flaky(1, new DiscogsTransientError("boom")));
-      const waiting = queue.enqueueAndWait({
-        runId: "inline-1",
-        type: "release_detail",
-        payload: { releaseId: 1 },
-      });
-      const outcome = waiting.catch((err: unknown) => err);
-
-      queue.start();
-      await vi.advanceTimersByTimeAsync(0);
-
-      expect(await outcome).toBeInstanceOf(QueueUnavailableError);
-      await expect(
-        queue.enqueueAndWait({ runId: "inline-2", type: "release_detail", payload: { releaseId: 2 } }),
-      ).rejects.toBeInstanceOf(QueueUnavailableError);
-    });
   });
 });

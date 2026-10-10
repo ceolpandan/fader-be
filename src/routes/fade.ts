@@ -144,7 +144,6 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
         fadeId: fades.id,
         title: releases.title,
         year: releases.year,
-        thumb: releases.thumb,
         artists: releases.artists,
       })
       .from(releases)
@@ -193,7 +192,6 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
           title: first?.title ?? fade.title,
           artists: first?.artists ?? fade.artists ?? [],
           year: first?.year ?? null,
-          thumb: first?.thumb ?? null,
           versionsIndexed: versions.length,
           lookupStatus: fade.lookupStatus,
         };

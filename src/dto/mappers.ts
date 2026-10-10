@@ -7,7 +7,6 @@ export function mapReleaseRowToDto(row: typeof releases.$inferSelect): ReleaseDe
   return {
     id: row.id,
     title: row.title,
-    ...(row.thumb ? { thumb: row.thumb } : {}),
     year: row.year,
     country: row.country,
     genres: row.genres,

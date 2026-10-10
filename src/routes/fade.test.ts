@@ -422,7 +422,6 @@ describe("fade", () => {
           title: null,
           artists: [],
           year: null,
-          thumb: null,
           versionsIndexed: 0,
           lookupStatus: "done",
         },
@@ -524,16 +523,16 @@ describe("fade", () => {
 
       const res = await asUser(app, "u2").get("/releases");
       expect(res.body.items).toHaveLength(4);
-      expect(res.body).toMatchObject({ total: 4, enrichedCount: 4, fadedCount: 0 });
+      expect(res.body).toMatchObject({ total: 4, fadedCount: 0 });
     });
 
-    it("reports enriched and faded counts that ignore filters, with total following the filters", async () => {
+    it("reports a faded count that ignores filters, with total following the filters", async () => {
       const user = asUser(app, "u1");
       await user.post("/fade").send({ releaseId: 111 });
 
       const res = await user.get("/releases?style=Ambient");
 
-      expect(res.body).toMatchObject({ total: 1, enrichedCount: 4, fadedCount: 2 });
+      expect(res.body).toMatchObject({ total: 1, fadedCount: 2 });
     });
 
     it("leaves facet options only for what is still visible", async () => {

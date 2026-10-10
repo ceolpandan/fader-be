@@ -11,7 +11,7 @@ paths:
   /releases:
     get:
       operationId: listReleases
-      summary: List every enriched release
+      summary: List every release
       description: >
         Pages, filters and sorts the stored releases; 400 on invalid input.
         Releases the user has faded (directly or through their master) are
@@ -96,7 +96,7 @@ paths:
           schema:
             type: string
             enum:
-              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks]
+              [title, -title, year, -year, artist, -artist, format, -format, tracks, -tracks]
             default: title
       responses:
         "200":
@@ -115,7 +115,7 @@ paths:
     get:
       operationId: getReleaseFacets
       summary: >
-        The genres, styles, format names and countries of all enriched releases,
+        The genres, styles, format names and countries of all stored releases,
         each with how many releases carry it, counted among the releases the same
         filters would list (faded ones excluded).
       parameters:
@@ -150,8 +150,7 @@ paths:
     get:
       operationId: getRelease
       summary: >
-        Get a release by id from our database; falls back to a live Discogs
-        fetch (saved for next time) when it is not indexed yet.
+        Get a release by id from our database. 404 when it is not stored.
       parameters:
         - name: id
           in: path
@@ -173,74 +172,6 @@ paths:
                 $ref: "#/components/schemas/ErrorDto"
         "404":
           description: Release not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
-        "502":
-          description: Discogs fetch failed after retries
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
-        "503":
-          description: Discogs is erroring and the queue is paused, retrying; try again shortly
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
-        "504":
-          description: Timed out waiting for the Discogs fetch
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
-  /releases/{id}/refresh:
-    post:
-      operationId: refreshRelease
-      summary: >
-        Force-refresh a release: fetch it live from Discogs (ahead of any
-        background indexing in the queue), overwrite everything stored for it,
-        and return the fresh release.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Release refreshed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReleaseDetailDto"
-        "400":
-          description: Invalid id
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
-        "404":
-          description: Release not found on Discogs
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
-        "502":
-          description: Discogs fetch failed after retries
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
-        "503":
-          description: Discogs is erroring and the queue is paused, retrying; try again shortly
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
-        "504":
-          description: Timed out waiting for the Discogs fetch
           content:
             application/json:
               schema:
@@ -268,8 +199,7 @@ paths:
         Fade a release or a master for the signed-in user. Any release or
         master can be faded, indexed or not. A release with a known master is
         stored as that master, hiding every version under it. Any other
-        release is stored as itself, and a lookup (queued ahead of scans and
-        enrichment) upgrades it to its master and stores the master's
+        release is stored as itself, and a lookup upgrades it to its master and stores the master's
         versions. The request waits for that lookup (up to about 20 seconds),
         so the answer names the fade and counts what it hides. If the wait
         runs out, or Discogs is paused, lookupStatus is pending, versionCount
@@ -298,9 +228,7 @@ paths:
       operationId: unfade
       summary: >
         Unfade a release or a master for the signed-in user. A release with a
-        master unfades that master and every version under it. Releases that
-        the fade kept out of enrichment are queued for enrichment again, unless
-        another fade of the user still covers them. Idempotent.
+        master unfades that master and every version under it. Idempotent.
       requestBody:
         required: true
         content:
@@ -529,11 +457,10 @@ components:
     ReleaseListItemDto:
       type: object
       required:
-        [releaseId, title, thumb, year, country, genres, styles, formats, ratingAverage, ratingCount, haves, wants, artists]
+        [releaseId, title, year, country, genres, styles, formats, artists]
       properties:
         releaseId: { type: integer }
         title: { type: string }
-        thumb: { type: string, nullable: true }
         year: { type: integer, nullable: true }
         country: { type: string, nullable: true }
         genres:
@@ -546,10 +473,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReleaseFormatDto"
-        ratingAverage: { type: number, nullable: true }
-        ratingCount: { type: integer, nullable: true }
-        haves: { type: integer, nullable: true }
-        wants: { type: integer, nullable: true }
         artists:
           type: array
           items:
@@ -557,7 +480,7 @@ components:
 
     ReleaseListPageDto:
       type: object
-      required: [items, page, pageSize, total, enrichedCount, fadedCount]
+      required: [items, page, pageSize, total, fadedCount]
       properties:
         items:
           type: array
@@ -568,12 +491,9 @@ components:
         total:
           type: integer
           description: Releases matching the current filters, faded ones excluded.
-        enrichedCount:
-          type: integer
-          description: All enriched releases, faded ones included. Ignores filters.
         fadedCount:
           type: integer
-          description: How many of enrichedCount are faded for the user. Ignores filters.
+          description: How many releases the user has faded. Ignores filters.
 
     FacetValueDto:
       type: object
@@ -662,7 +582,7 @@ components:
 
     FadedItemDto:
       type: object
-      required: [kind, id, fadedAt, title, artists, year, thumb, versionsIndexed, lookupStatus]
+      required: [kind, id, fadedAt, title, artists, year, versionsIndexed, lookupStatus]
       properties:
         kind:
           type: string
@@ -684,9 +604,6 @@ components:
           items: { $ref: "#/components/schemas/ReleaseArtistStub" }
         year:
           type: integer
-          nullable: true
-        thumb:
-          type: string
           nullable: true
         versionsIndexed:
           type: integer
@@ -849,13 +766,11 @@ components:
     ReleaseDetailDto:
       type: object
       description: >
-        Served from our own database (fetched live from Discogs and saved on
-        first request if the release is not indexed yet).
+        Served from our own database.
       required: [id, title, year, country, artists, tracklist, videos]
       properties:
         id: { type: integer }
         title: { type: string }
-        thumb: { type: string }
         year: { type: integer, nullable: true }
         country: { type: string, nullable: true }
         genres:

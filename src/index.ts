@@ -5,7 +5,6 @@ import { createApp } from "./app";
 import { createDb } from "./db/client";
 import { getAllMasterVersionReleaseIds, getRelease } from "./discogs-client";
 import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
-import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
 import { logger } from "./util/logger";
 
@@ -24,7 +23,6 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = createDb(dbPath);
 
 const queue = new DiscogsQueue(db);
-queue.registerHandler("release_detail", createReleaseDetailHandler({ db, getRelease }));
 queue.registerHandler(
   "fade_lookup",
   createFadeLookupHandler({

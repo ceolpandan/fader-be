@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, real, primaryKey, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, primaryKey, index } from "drizzle-orm/sqlite-core";
 
 export interface ReleaseFormat {
   name: string;
@@ -31,23 +31,14 @@ export const releases = sqliteTable("releases", {
   styles: text("styles", { mode: "json" }).$type<string[]>().notNull(),
   formats: text("formats", { mode: "json" }).$type<ReleaseFormat[]>().notNull(),
   masterId: integer("master_id"),
-  thumb: text("thumb"),
-  ratingAverage: real("rating_average"),
-  ratingCount: integer("rating_count"),
-  haves: integer("haves"),
-  wants: integer("wants"),
   labelIds: text("label_ids", { mode: "json" }).$type<number[]>().notNull(),
   artists: text("artists", { mode: "json" }).$type<ReleaseArtistStub[]>().notNull(),
   tracklist: text("tracklist", { mode: "json" }).$type<ReleaseTrack[]>().notNull().default([]),
   videos: text("videos", { mode: "json" }).$type<ReleaseVideo[]>().notNull().default([]),
 }, (table) => [index("releases_master_id_idx").on(table.masterId)]);
 
-export type QueueJobType = "release_detail" | "fade_lookup";
+export type QueueJobType = "fade_lookup";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
-
-export interface ReleaseDetailPayload {
-  releaseId: number;
-}
 
 /** Resolves a fade against Discogs: a release fade finds its master, a master fade fetches its versions. */
 export interface FadeLookupPayload {
@@ -57,7 +48,6 @@ export interface FadeLookupPayload {
 }
 
 export interface QueueJobPayloadMap {
-  release_detail: ReleaseDetailPayload;
   fade_lookup: FadeLookupPayload;
 }
 
@@ -66,7 +56,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
-    .$type<ReleaseDetailPayload | FadeLookupPayload>()
+    .$type<FadeLookupPayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
   priority: integer("priority").notNull().default(0),

@@ -3,7 +3,7 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Request } from "express";
 import { releases } from "../db/schema";
 
-const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks"] as const;
+const SORT_FIELDS = ["title", "year", "artist", "format", "tracks"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
 const SORT_OPTIONS = SORT_FIELDS.flatMap((field) => [field, `-${field}`]) as string[];
 
@@ -99,14 +99,12 @@ function sortColumn(field: SortField) {
       return sql`json_extract(${releases.artists}, '$[0].name')`;
     case "format":
       return sql`json_extract(${releases.formats}, '$[0].name')`;
-    case "rating":
-      return releases.ratingAverage;
     case "tracks":
       return sql`json_array_length(${releases.tracklist})`;
   }
 }
 
-/** The paging, filters and sort shared by every endpoint that lists enriched releases. */
+/** The paging, filters and sort shared by every endpoint that lists releases. */
 export interface ReleaseQuery {
   page: number;
   pageSize: number;
@@ -187,14 +185,8 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   const styleCombinations = combinations.length > 0 ? styleCombinationsFilter(combinations) : null;
 
   const orderExpr = sortColumn(sortField);
-  // Unrated releases are noise at either end of a rating sort, so they always go last.
-  // Likewise a release with no tracklist has no known track count, so it goes last.
-  const nullsLast =
-    sortField === "rating"
-      ? [sql`${orderExpr} IS NULL`]
-      : sortField === "tracks"
-        ? [sql`${orderExpr} = 0`]
-        : [];
+  // A release with no tracklist has no known track count, so it goes last.
+  const nullsLast = sortField === "tracks" ? [sql`${orderExpr} = 0`] : [];
   const orderBy = [...nullsLast, isDescending ? desc(orderExpr) : asc(orderExpr), sql`${releases.id}`];
 
   return { query: { page, pageSize, filters, styleCombinations, orderBy } };

@@ -2,8 +2,7 @@
 
 Backend service for the Discogs Fader extension. Owns our own DTOs and acts as the
 boundary between the extension and Discogs' API — the extension never calls Discogs
-directly. Only exposes what the extension needs (release/master id, title, thumb,
-etc.), not Discogs' full payloads.
+directly. Only exposes what the extension needs (release/master id, title, etc.), not Discogs' full payloads.
 
 Stores the releases it fetches in a local database, through a Discogs-rate-limited
 request queue, and lists and filters them for `fader-ui`. It has no seller, inventory or listing
@@ -33,7 +32,6 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 
 - `GET /releases` — paginated, filterable list of the stored releases (`?page=&pageSize=&sort=` and the filters)
 - `GET /releases/facets` — the genres, styles, formats and countries of the releases a filter leaves
-- `POST /releases/:id/refresh` — re-fetch one release from Discogs
 
 Set `DISCOGS_TOKEN` (personal access token from
 https://www.discogs.com/settings/developers) to raise Discogs' rate limit.

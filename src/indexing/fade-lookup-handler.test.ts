@@ -162,7 +162,7 @@ describe("fade_lookup handler", () => {
     it("ignores jobs that succeeded or are of another type", () => {
       fade("u1", "release", 1);
       markFadeLookupFailed(db, job("done"));
-      markFadeLookupFailed(db, { ...job("failed"), type: "release_detail" });
+      markFadeLookupFailed(db, { ...job("failed"), type: "something_else" });
 
       expect(
         db

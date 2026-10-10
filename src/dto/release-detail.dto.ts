@@ -4,7 +4,6 @@ import type { ReleaseArtistStub, ReleaseTrack, ReleaseVideo } from "../db/schema
 export interface ReleaseDetailDto {
   id: number;
   title: string;
-  thumb?: string;
   year: number | null;
   country: string | null;
   genres?: string[];

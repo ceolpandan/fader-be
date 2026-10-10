@@ -40,7 +40,6 @@ describe("GET /releases and /releases/facets", () => {
       styles: string[];
       formats: { name: string; descriptions: string[] }[];
       artists: { id: number; name: string }[];
-      ratingAverage: number | null;
       masterId: number | null;
       videos: { uri: string; title: string }[];
       tracklist: { position: string; title: string }[];
@@ -50,7 +49,6 @@ describe("GET /releases and /releases/facets", () => {
       .values({
         id,
         title,
-        ratingAverage: overrides.ratingAverage ?? null,
         videos: overrides.videos ?? [],
         tracklist: overrides.tracklist ?? [],
         year: overrides.year ?? 2000,
@@ -92,26 +90,21 @@ describe("GET /releases and /releases/facets", () => {
   });
 
   describe("GET /releases", () => {
-    it("lists every enriched release", async () => {
+    it("lists every release", async () => {
       seedRelease(1, "Alpha", { country: "UK", genres: ["Rock"], artists: [{ id: 7, name: "Band" }] });
 
       const res = await get("/releases");
       expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ page: 1, pageSize: 50, total: 1, enrichedCount: 1, fadedCount: 0 });
+      expect(res.body).toMatchObject({ page: 1, pageSize: 50, total: 1, fadedCount: 0 });
       expect(res.body.items).toEqual([
         {
           releaseId: 1,
           title: "Alpha",
-          thumb: null,
           year: 2000,
           country: "UK",
           genres: ["Rock"],
           styles: [],
           formats: [],
-          ratingAverage: null,
-          ratingCount: null,
-          haves: null,
-          wants: null,
           artists: [{ id: 7, name: "Band" }],
         },
       ]);
@@ -140,19 +133,18 @@ describe("GET /releases and /releases/facets", () => {
 
       const filtered = await get("/releases?genre=Jazz");
       expect(filtered.body.total).toBe(2);
-      expect(filtered.body.enrichedCount).toBe(3);
+      expect(filtered.body.enrichedCount).toBeUndefined();
     });
 
-    it("sorts, with the descending prefix and unrated releases last", async () => {
-      seedRelease(1, "B", { year: 1990, ratingAverage: 3 });
-      seedRelease(2, "A", { year: 2000, ratingAverage: null });
-      seedRelease(3, "C", { year: 1980, ratingAverage: 4.5 });
+    it("sorts, with the descending prefix, and rejects the retired rating sort", async () => {
+      seedRelease(1, "B", { year: 1990 });
+      seedRelease(2, "A", { year: 2000 });
+      seedRelease(3, "C", { year: 1980 });
 
       expect(titles((await get("/releases")).body)).toEqual(["A", "B", "C"]);
       expect(titles((await get("/releases?sort=-title")).body)).toEqual(["C", "B", "A"]);
       expect(titles((await get("/releases?sort=year")).body)).toEqual(["C", "B", "A"]);
-      expect(titles((await get("/releases?sort=-rating")).body)).toEqual(["C", "B", "A"]);
-      expect(titles((await get("/releases?sort=rating")).body)).toEqual(["B", "C", "A"]);
+      expect((await get("/releases?sort=rating")).status).toBe(400);
     });
 
     it("sorts by track count, with releases that have no tracklist last", async () => {
@@ -201,7 +193,7 @@ describe("GET /releases and /releases/facets", () => {
 
       const res = await get("/releases");
       expect(titles(res.body)).toEqual(["Kept"]);
-      expect(res.body).toMatchObject({ total: 1, enrichedCount: 3, fadedCount: 2 });
+      expect(res.body).toMatchObject({ total: 1, fadedCount: 2 });
     });
 
     it.each([
@@ -326,7 +318,7 @@ describe("GET /releases and /releases/facets", () => {
       expect(res.status).toBe(400);
     });
 
-    it("returns empty arrays when nothing is enriched", async () => {
+    it("returns empty arrays when there are no releases", async () => {
       const res = await get("/releases/facets");
       expect(res.body).toEqual({ genres: [], styles: [], formats: [], countries: [] });
     });
