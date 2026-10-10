@@ -9,14 +9,12 @@ import { discogsQueueJobs } from "../db/schema";
 import { DiscogsAuthError, DiscogsRateLimitError, DiscogsTransientError } from "../discogs-client";
 import {
   DiscogsQueue,
-  INLINE_PRIORITY,
   MAX_CAP_RETRIES,
   MAX_TRANSIENT_ATTEMPTS,
   NonRetryableError,
   PACING_MS,
   QueueUnavailableError,
   QueueWaitTimeoutError,
-  SCAN_PRIORITY,
 } from "./discogs-queue";
 
 describe("DiscogsQueue", () => {
@@ -43,19 +41,19 @@ describe("DiscogsQueue", () => {
 
   it("processes an enqueued job through a registered handler and marks it done", async () => {
     const handler = vi.fn(async () => {});
-    queue.registerHandler("inventory_page", handler);
+    queue.registerHandler("fade_lookup", handler);
 
     const jobId = queue.enqueue({
       runId: "run-1",
-      type: "inventory_page",
-      payload: { username: "some-seller", page: 1 },
+      type: "fade_lookup",
+      payload: { uid: "u", kind: "release", id: 1 },
     });
 
     queue.start();
     await vi.advanceTimersByTimeAsync(0);
 
     expect(handler).toHaveBeenCalledWith(
-      { username: "some-seller", page: 1 },
+      { uid: "u", kind: "release", id: 1 },
       { runId: "run-1", jobId, attempt: 1 },
     );
 
@@ -68,10 +66,10 @@ describe("DiscogsQueue", () => {
     const handler = vi.fn(async () => {
       invokedAt.push(Date.now());
     });
-    queue.registerHandler("inventory_page", handler);
+    queue.registerHandler("fade_lookup", handler);
 
-    queue.enqueue({ runId: "run-1", type: "inventory_page", payload: { username: "a", page: 1 } });
-    queue.enqueue({ runId: "run-1", type: "inventory_page", payload: { username: "a", page: 2 } });
+    queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
+    queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 2 } });
 
     queue.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -88,12 +86,12 @@ describe("DiscogsQueue", () => {
     const handler = vi.fn(async () => {
       throw new Error("discogs is down");
     });
-    queue.registerHandler("inventory_page", handler);
+    queue.registerHandler("fade_lookup", handler);
 
     const jobId = queue.enqueue({
       runId: "run-1",
-      type: "inventory_page",
-      payload: { username: "a", page: 1 },
+      type: "fade_lookup",
+      payload: { uid: "u", kind: "release", id: 1 },
     });
 
     queue.start();
@@ -133,9 +131,9 @@ describe("DiscogsQueue", () => {
   it("runs a higher-priority job before earlier-enqueued lower-priority jobs, keeping id order among equals", async () => {
     const order: string[] = [];
     queue.registerHandler(
-      "inventory_page",
-      vi.fn(async (payload: { page: number }) => {
-        order.push(`page-${payload.page}`);
+      "fade_lookup",
+      vi.fn(async (payload: { id: number }) => {
+        order.push(`page-${payload.id}`);
       }),
     );
     queue.registerHandler(
@@ -145,8 +143,8 @@ describe("DiscogsQueue", () => {
       }),
     );
 
-    queue.enqueue({ runId: "run-1", type: "inventory_page", payload: { username: "a", page: 1 } });
-    queue.enqueue({ runId: "run-1", type: "inventory_page", payload: { username: "a", page: 2 } });
+    queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
+    queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 2 } });
     queue.enqueue({ runId: "run-2", type: "release_detail", payload: { releaseId: 7 }, priority: 10 });
 
     queue.start();
@@ -156,82 +154,14 @@ describe("DiscogsQueue", () => {
     expect(order).toEqual(["release-7", "page-1", "page-2"]);
   });
 
-  describe("scan priority", () => {
-    const record = () => {
-      const order: string[] = [];
-      queue.registerHandler(
-        "inventory_page",
-        vi.fn(async (payload: { page: number }) => {
-          order.push(`page-${payload.page}`);
-        }),
-      );
-      queue.registerHandler(
-        "release_detail",
-        vi.fn(async (payload: { releaseId: number }) => {
-          order.push(`release-${payload.releaseId}`);
-        }),
-      );
-      return order;
-    };
-    const scanPage = (page: number) =>
-      queue.enqueue({
-        runId: "run-1",
-        type: "inventory_page",
-        payload: { username: "a", page },
-        priority: SCAN_PRIORITY,
-      });
-    const detail = (releaseId: number) =>
-      queue.enqueue({ runId: "run-1", type: "release_detail", payload: { releaseId } });
-
-    it("gives enrichment a turn after every SCAN_BURST scan jobs, instead of waiting for the scan to end", async () => {
-      const order = record();
-      detail(1);
-      detail(2);
-      for (let page = 1; page <= 8; page += 1) scanPage(page);
-
-      queue.start();
-      await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(PACING_MS * 9);
-
-      expect(order).toEqual([
-        "page-1", "page-2", "page-3", "release-1",
-        "page-4", "page-5", "page-6", "release-2",
-        "page-7", "page-8",
-      ]);
-    });
-
-    it("keeps scanning when no enrichment is waiting", async () => {
-      const order = record();
-      for (let page = 1; page <= 5; page += 1) scanPage(page);
-
-      queue.start();
-      await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(PACING_MS * 4);
-
-      expect(order).toEqual(["page-1", "page-2", "page-3", "page-4", "page-5"]);
-    });
-
-    it("still lets an inline job go ahead of the scan", async () => {
-      const order = record();
-      for (let page = 1; page <= 4; page += 1) scanPage(page);
-      queue.enqueue({ runId: "inline", type: "release_detail", payload: { releaseId: 9 }, priority: INLINE_PRIORITY });
-
-      queue.start();
-      await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(PACING_MS * 4);
-
-      expect(order[0]).toBe("release-9");
-    });
-  });
-
   it("resets a job stuck in processing back to pending on start (crash recovery)", async () => {
     const now = new Date();
     const [stuck] = db
       .insert(discogsQueueJobs)
       .values({
         runId: "run-1",
-        type: "inventory_page",
-        payload: { username: "a", page: 1, runStartedAt: now.toISOString() },
+        type: "fade_lookup",
+        payload: { uid: "u", kind: "release", id: 1 },
         status: "processing",
         createdAt: now,
         updatedAt: now,
@@ -255,7 +185,7 @@ describe("DiscogsQueue", () => {
     const settled: string[] = [];
     queue.onSettled((job) => settled.push(`${job.type}:${job.status}`));
 
-    queue.registerHandler("inventory_page", vi.fn(async () => {}));
+    queue.registerHandler("fade_lookup", vi.fn(async () => {}));
     queue.registerHandler(
       "release_detail",
       vi.fn(async () => {
@@ -263,22 +193,22 @@ describe("DiscogsQueue", () => {
       }),
     );
 
-    queue.enqueue({ runId: "run-1", type: "inventory_page", payload: { username: "a", page: 1 } });
+    queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
     queue.enqueue({ runId: "run-1", type: "release_detail", payload: { releaseId: 1 } });
 
     queue.start();
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(PACING_MS);
 
-    expect(settled).toEqual(["inventory_page:done", "release_detail:failed"]);
+    expect(settled).toEqual(["fade_lookup:done", "release_detail:failed"]);
   });
 
   it("lets a priority job cut in mid-run, then resumes background jobs in order", async () => {
     const order: string[] = [];
     queue.registerHandler(
-      "inventory_page",
-      vi.fn(async (payload: { page: number }) => {
-        order.push(`page-${payload.page}`);
+      "fade_lookup",
+      vi.fn(async (payload: { id: number }) => {
+        order.push(`page-${payload.id}`);
       }),
     );
     queue.registerHandler(
@@ -288,7 +218,7 @@ describe("DiscogsQueue", () => {
       }),
     );
     for (const page of [1, 2, 3]) {
-      queue.enqueue({ runId: "run-1", type: "inventory_page", payload: { username: "a", page } });
+      queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: page } });
     }
 
     queue.start();
@@ -310,7 +240,7 @@ describe("DiscogsQueue", () => {
     it("resolves once the handler succeeds, jumping ahead of pending background jobs", async () => {
       const order: string[] = [];
       queue.registerHandler(
-        "inventory_page",
+        "fade_lookup",
         vi.fn(async () => {
           order.push("page");
         }),
@@ -321,7 +251,7 @@ describe("DiscogsQueue", () => {
           order.push("release");
         }),
       );
-      queue.enqueue({ runId: "run-1", type: "inventory_page", payload: { username: "a", page: 1 } });
+      queue.enqueue({ runId: "run-1", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
 
       const waiting = queue.enqueueAndWait({
         runId: "inline-1",
@@ -490,8 +420,8 @@ describe("DiscogsQueue", () => {
 
     it("backs off 1, 2, 4, 8 then 10 min, and resets to 1 min after a success", async () => {
       const handler = flaky(5, new DiscogsTransientError("boom"));
-      queue.registerHandler("inventory_page", handler);
-      queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 1 } });
+      queue.registerHandler("fade_lookup", handler);
+      queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
 
@@ -506,8 +436,8 @@ describe("DiscogsQueue", () => {
       expect(queue.getPause()).toBeNull();
 
       // the next failure starts over at 1 min
-      queue.registerHandler("inventory_page", flaky(1, new DiscogsTransientError("again")));
-      queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 2 } });
+      queue.registerHandler("fade_lookup", flaky(1, new DiscogsTransientError("again")));
+      queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 2 } });
       await vi.advanceTimersByTimeAsync(PACING_MS);
       expect(queue.getPause()!.backoffMs).toBe(MIN);
     });
@@ -549,12 +479,12 @@ describe("DiscogsQueue", () => {
       const handler = vi.fn(async () => {
         throw new DiscogsTransientError("down");
       });
-      queue.registerHandler("inventory_page", handler);
+      queue.registerHandler("fade_lookup", handler);
       const aborted = vi.fn();
       queue.onRunAborted(aborted);
-      const first = queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 1 } });
-      const sameRun = queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 2 } });
-      const otherRun = queue.enqueue({ runId: "b", type: "inventory_page", payload: { username: "u", page: 3 } });
+      const first = queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
+      const sameRun = queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 2 } });
+      const otherRun = queue.enqueue({ runId: "b", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 3 } });
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
@@ -599,10 +529,10 @@ describe("DiscogsQueue", () => {
     });
 
     it("does not skip a scan page on repeated Discogs errors", async () => {
-      queue.registerHandler("inventory_page", vi.fn(async () => {
+      queue.registerHandler("fade_lookup", vi.fn(async () => {
         throw new DiscogsTransientError("500");
       }));
-      const id = queue.enqueue({ runId: "a", type: "inventory_page", payload: { username: "u", page: 1 } });
+      const id = queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 1 } });
 
       queue.start();
       await vi.advanceTimersByTimeAsync(0);

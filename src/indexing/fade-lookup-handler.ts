@@ -23,7 +23,7 @@ export interface FadeLookupHandlerDeps {
   getMasterVersionReleaseIds: (masterId: number) => Promise<number[]>;
 }
 
-/** Queue run id of a fade's lookup, kept apart from every seller's indexing run. */
+/** Queue run id of a fade's lookup, kept apart from every other run. */
 export function fadeLookupRunId(uid: string, id: number): string {
   return `fade:${uid}:${id}`;
 }

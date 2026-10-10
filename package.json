@@ -12,8 +12,7 @@
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "ts-node --transpile-only scripts/migrate.ts",
-    "db:backfill-avatars": "ts-node --transpile-only scripts/backfill-avatars.ts"
+    "db:migrate": "ts-node --transpile-only scripts/migrate.ts"
   },
   "keywords": [],
   "author": "",

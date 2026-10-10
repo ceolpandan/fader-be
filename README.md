@@ -5,9 +5,9 @@ boundary between the extension and Discogs' API — the extension never calls Di
 directly. Only exposes what the extension needs (release/master id, title, thumb,
 etc.), not Discogs' full payloads.
 
-Also indexes Discogs sellers' marketplace inventories into a local database,
-enriching each release through a Discogs-rate-limited request queue. Full design in
-`.scratch/discogs-indexing/spec.md`.
+Stores the releases it fetches in a local database, through a Discogs-rate-limited
+request queue, and lists and filters them for `fader-ui`. This is the `main-tou` branch,
+which has no seller, inventory or listing features (see `docs/adr/0005-main-tou-branch.md`).
 
 ## Run locally
 
@@ -29,12 +29,11 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 - `GET /masters/:id` — proxies `https://api.discogs.com/masters/:id`
 - `POST /fade` — resolves a release/master id to every sibling id that should fade together
 
-### Seller inventory indexing
+### Stored releases
 
-- `POST /sellers/:username/index` — start (or re-trigger) indexing a seller's inventory
-- `GET /sellers/:username` — indexing status + live progress counts for the current run
-- `GET /sellers/:username/inventory` — paginated list of a seller's indexed releases
-  (`?status=active|sold|all&page=&pageSize=`)
+- `GET /releases` — paginated, filterable list of the stored releases (`?page=&pageSize=&sort=` and the filters)
+- `GET /releases/facets` — the genres, styles, formats and countries of the releases a filter leaves
+- `POST /releases/:id/refresh` — re-fetch one release from Discogs
 
 Set `DISCOGS_TOKEN` (personal access token from
 https://www.discogs.com/settings/developers) to raise Discogs' rate limit.
@@ -60,12 +59,11 @@ src/
   index.ts           entrypoint: wires the db, queue, job handlers, starts the server
   app.ts             express app + middleware wiring
   discogs-client.ts  fetch wrapper for the real Discogs API
-  db/                Drizzle schema (releases, sellers, seller_inventory,
-                     discogs_queue_jobs) + db client
+  db/                Drizzle schema (releases, fades, master_versions,
+                     discogs_queue_jobs, user_settings) + db client
   queue/             generic rate-limited, durable job queue (DiscogsQueue)
-  indexing/          seller-inventory indexing: job handlers, run-completion
-                     detection, sold-inventory auto-purge
-  routes/            releases.ts, masters.ts, fade.ts, sellers.ts
+  indexing/          queue job handlers: release detail, fade lookup
+  routes/            releases.ts, masters.ts, fade.ts, settings.ts
   types/             raw Discogs API response types
   dto/               our DTOs (all Discogs release/master fields kept for now) + mappers
   docs/              openapi.yaml served via Swagger UI

@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { fades, releases, sellerInventory } from "../db/schema";
+import { fades, releases } from "../db/schema";
 import { DiscogsQueue } from "../queue/discogs-queue";
 import { createApp } from "../app";
 
@@ -92,7 +92,7 @@ describe("GET /releases and /releases/facets", () => {
   });
 
   describe("GET /releases", () => {
-    it("lists every enriched release without the seller-specific fields", async () => {
+    it("lists every enriched release", async () => {
       seedRelease(1, "Alpha", { country: "UK", genres: ["Rock"], artists: [{ id: 7, name: "Band" }] });
 
       const res = await get("/releases");
@@ -117,19 +117,6 @@ describe("GET /releases and /releases/facets", () => {
       ]);
     });
 
-    it("includes releases no seller lists any more", async () => {
-      seedRelease(1, "Orphan");
-      seedRelease(2, "Listed");
-      const now = new Date();
-      db.insert(sellerInventory)
-        .values({ sellerUsername: "gone", releaseId: 2, status: "sold", firstSeenAt: now, lastSeenAt: now, soldAt: now })
-        .run();
-
-      const res = await get("/releases");
-      expect(titles(res.body)).toEqual(["Listed", "Orphan"]);
-      expect(res.body.total).toBe(2);
-    });
-
     it("filters by noLinks: only keeps releases without video links, exclude drops them", async () => {
       seedRelease(1, "Linked", { videos: [{ uri: "https://youtube.com/x", title: "x" }] });
       seedRelease(2, "Bare");
@@ -139,7 +126,7 @@ describe("GET /releases and /releases/facets", () => {
       expect((await get("/releases?noLinks=maybe")).status).toBe(400);
     });
 
-    it("filters like the seller inventory", async () => {
+    it("filters by genre, style, format, country and year", async () => {
       seedRelease(1, "A", { genres: ["Rock"], styles: ["Punk"], formats: format("Vinyl"), country: "UK", year: 1977 });
       seedRelease(2, "B", { genres: ["Jazz"], styles: ["Bop"], formats: format("CD"), country: "US", year: 1999 });
       seedRelease(3, "C", { genres: ["Rock", "Jazz"], styles: ["Fusion"], formats: format("Vinyl"), country: "US", year: 1985 });

@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, fades, masterVersions, releases, sellerInventory } from "../db/schema";
+import { discogsQueueJobs, fades, masterVersions, releases } from "../db/schema";
 import { createFadeLookupHandler } from "../indexing/fade-lookup-handler";
 import { DiscogsQueue, INLINE_PRIORITY } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
@@ -63,20 +63,6 @@ describe("fade", () => {
         formats: [],
         labelIds: [],
         artists: (overrides.artists ?? []).map((name, i) => ({ id: i + 1, name })),
-      })
-      .run();
-  }
-
-  function seedInventory(seller: string, releaseId: number, status: "active" | "sold" = "active") {
-    const now = new Date();
-    db.insert(sellerInventory)
-      .values({
-        sellerUsername: seller,
-        releaseId,
-        status,
-        firstSeenAt: now,
-        lastSeenAt: now,
-        soldAt: null,
       })
       .run();
   }
@@ -388,48 +374,6 @@ describe("fade", () => {
       expect(db.select().from(fades).all()).toEqual([]);
     });
 
-    it("re-queues enrichment for covered inventory releases that were never enriched", async () => {
-      db.insert(masterVersions)
-        .values([
-          { masterId: 900, releaseId: 111 },
-          { masterId: 900, releaseId: 112 },
-          { masterId: 900, releaseId: 113 },
-        ])
-        .run();
-      seedRelease(112, 900);
-      seedInventory("seller-a", 111);
-      seedInventory("seller-a", 112);
-      seedInventory("seller-a", 113);
-      await asUser(app, "u1").post("/fade").send({ masterId: 900 });
-      db.insert(fades).values({ uid: "u1", kind: "release", id: 113, createdAt: new Date() }).run();
-      queue.enqueue({ runId: "run-x", type: "release_detail", payload: { releaseId: 111 } });
-
-      await asUser(app, "u1").delete("/fade").send({ masterId: 900 });
-
-      const details = db
-        .select()
-        .from(discogsQueueJobs)
-        .where(eq(discogsQueueJobs.type, "release_detail"))
-        .all();
-      // 111 is already queued, 112 is enriched, 113 is still faded as a release itself.
-      expect(details).toHaveLength(1);
-    });
-
-    it("queues enrichment for a covered release once nothing covers it", async () => {
-      db.insert(masterVersions).values({ masterId: 900, releaseId: 111 }).run();
-      seedInventory("seller-a", 111);
-      await asUser(app, "u1").post("/fade").send({ masterId: 900 });
-
-      await asUser(app, "u1").delete("/fade").send({ masterId: 900 });
-
-      const details = db
-        .select()
-        .from(discogsQueueJobs)
-        .where(eq(discogsQueueJobs.type, "release_detail"))
-        .all();
-      expect(details).toMatchObject([{ priority: 0, payload: { releaseId: 111 } }]);
-    });
-
     it("leaves other collectors' fades alone and is idempotent", async () => {
       await asUser(app, "u2").post("/fade").send({ masterId: 900 });
 
@@ -542,88 +486,70 @@ describe("fade", () => {
   });
 
   describe("hiding faded releases", () => {
+    const ids = (res: { body: { items: { releaseId: number }[] } }) =>
+      res.body.items.map((i) => i.releaseId).sort();
+
     beforeEach(() => {
       // 111 and 112 are versions of master 900, 555 has no master, 300 is a different master
       seedRelease(111, 900, { styles: ["Techno"] });
       seedRelease(112, 900, { styles: ["Techno"] });
       seedRelease(555, null, { styles: ["Ambient"] });
       seedRelease(300, 301, { styles: ["House"] });
-      for (const id of [111, 112, 555, 300]) seedInventory("seller-1", id);
-      seedInventory("seller-2", 112);
-      seedInventory("seller-2", 300);
     });
 
-    it("hides every version of a faded master, across sellers", async () => {
+    it("hides every version of a faded master", async () => {
       const user = asUser(app, "u1");
       await user.post("/fade").send({ releaseId: 111 });
 
-      const one = await user.get("/sellers/seller-1/inventory");
-      expect(one.body.items.map((i: { releaseId: number }) => i.releaseId).sort()).toEqual([300, 555]);
-
-      const two = await user.get("/sellers/seller-2/inventory");
-      expect(two.body.items.map((i: { releaseId: number }) => i.releaseId)).toEqual([300]);
+      expect(ids(await user.get("/releases"))).toEqual([300, 555]);
     });
 
     it("hides a faded release that has no master", async () => {
       const user = asUser(app, "u1");
       await user.post("/fade").send({ releaseId: 555 });
 
-      const res = await user.get("/sellers/seller-1/inventory");
-      expect(res.body.items.map((i: { releaseId: number }) => i.releaseId).sort()).toEqual([111, 112, 300]);
+      expect(ids(await user.get("/releases"))).toEqual([111, 112, 300]);
     });
 
     it("hides a version that is added to a faded master later", async () => {
       const user = asUser(app, "u1");
       await user.post("/fade").send({ masterId: 900 });
       seedRelease(113, 900);
-      seedInventory("seller-1", 113);
 
-      const res = await user.get("/sellers/seller-1/inventory");
-      expect(res.body.items.map((i: { releaseId: number }) => i.releaseId).sort()).toEqual([300, 555]);
+      expect(ids(await user.get("/releases"))).toEqual([300, 555]);
     });
 
     it("does not hide anything for other users", async () => {
       await asUser(app, "u1").post("/fade").send({ releaseId: 111 });
 
-      const res = await asUser(app, "u2").get("/sellers/seller-1/inventory");
+      const res = await asUser(app, "u2").get("/releases");
       expect(res.body.items).toHaveLength(4);
-      expect(res.body).toMatchObject({ total: 4, forSaleCount: 4, fadedCount: 0 });
+      expect(res.body).toMatchObject({ total: 4, enrichedCount: 4, fadedCount: 0 });
     });
 
-    it("reports for-sale and faded counts that ignore filters, with total following the filters", async () => {
+    it("reports enriched and faded counts that ignore filters, with total following the filters", async () => {
       const user = asUser(app, "u1");
       await user.post("/fade").send({ releaseId: 111 });
 
-      const res = await user.get("/sellers/seller-1/inventory?style=Ambient");
+      const res = await user.get("/releases?style=Ambient");
 
-      expect(res.body).toMatchObject({ total: 1, forSaleCount: 4, fadedCount: 2 });
-    });
-
-    it("counts only active enriched items in forSaleCount", async () => {
-      seedInventory("seller-1", 999); // not enriched
-      seedRelease(600, null);
-      seedInventory("seller-1", 600, "sold");
-
-      const res = await asUser(app, "u1").get("/sellers/seller-1/inventory");
-
-      expect(res.body).toMatchObject({ forSaleCount: 4, fadedCount: 0 });
+      expect(res.body).toMatchObject({ total: 1, enrichedCount: 4, fadedCount: 2 });
     });
 
     it("leaves facet options only for what is still visible", async () => {
       const user = asUser(app, "u1");
       await user.post("/fade").send({ masterId: 900 });
 
-      const res = await user.get("/sellers/seller-1/inventory/facets");
+      const res = await user.get("/releases/facets");
       expect(res.body.styles.map((s: { value: string }) => s.value)).toEqual(["Ambient", "House"]);
     });
 
     it("keeps a facet option while an unfaded release still carries it", async () => {
       seedRelease(700, null, { styles: ["Techno"] });
-      seedInventory("seller-1", 700);
       const user = asUser(app, "u1");
       await user.post("/fade").send({ masterId: 900 });
 
-      const res = await user.get("/sellers/seller-1/inventory/facets");
+      const res = await user.get("/releases/facets");
       expect(res.body.styles).toContainEqual({ value: "Techno", count: 1 });
     });
   });

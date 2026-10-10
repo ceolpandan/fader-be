@@ -1,10 +1,14 @@
 # fader-be
 
-Express + SQLite (Drizzle) API that indexes Discogs seller inventories and serves them to `fader-ui` (sibling repo at `../fader-ui`) and the Discogs Fader extension. Commands and layout: `README.md`.
+Express + SQLite (Drizzle) API that serves enriched Discogs releases and fades to `fader-ui` (sibling repo at `../fader-ui`) and the Discogs Fader extension. Commands and layout: `README.md`.
+
+## This is `main-tou`
+
+This branch exists to comply with the Discogs API terms of use: no seller, inventory or listing endpoints, code or stored data. `main` keeps those and must not be changed from here. Read `docs/adr/0005-main-tou-branch.md` before adding anything that touches seller, inventory, listing or price data, and do not port such features over from `main`. The matching branch in `../fader-ui` is also `main-tou`; `fader-fe` is unchanged. Never point this branch's `DB_PATH` at the database `main` uses: its migration drops the seller tables.
 
 ## Issue tracker
 
-GitHub issues, all filed in `fader-ui` (even backend work). Reference them as `fader-ui#<n>` in commits. `.scratch/` holds the archived indexing spec only; write no new tickets there.
+GitHub issues, all filed in `fader-ui` (even backend work). Reference them as `fader-ui#<n>` in commits.
 
 ## Git workflow
 

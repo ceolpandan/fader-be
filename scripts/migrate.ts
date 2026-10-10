@@ -12,4 +12,7 @@ const db = drizzle(sqlite);
 
 migrate(db, { migrationsFolder: "./drizzle" });
 
+// Dropped tables leave their rows in the file's free pages until the file is rebuilt.
+sqlite.exec("VACUUM");
+
 console.log(`Migrations applied to ${dbPath}`);

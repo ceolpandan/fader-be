@@ -1,6 +1,4 @@
 import type {
-  DiscogsInventoryPage,
-  DiscogsUserProfile,
   DiscogsMaster,
   DiscogsMasterVersionsResponse,
   DiscogsRelease,
@@ -30,9 +28,6 @@ export class DiscogsRateLimitError extends DiscogsTransientError {}
 
 /** Discogs rejected our token (401/403). Retrying cannot help, so the run fails. */
 export class DiscogsAuthError extends Error {}
-
-/** Discogs won't paginate past page 100 of another seller's inventory. Not a token problem. */
-export class DiscogsPaginationCapError extends Error {}
 
 function retryAfterMs(res: Response): number | null {
   const seconds = Number(res.headers.get("Retry-After"));
@@ -65,11 +60,9 @@ async function discogsGet<T>(path: string): Promise<T> {
     );
   }
   if (res.status === 401 || res.status === 403) {
-    const body = await res.text();
-    if (res.status === 403 && body.includes("Pagination above")) {
-      throw new DiscogsPaginationCapError(`Discogs pagination cap for ${path}: ${body}`);
-    }
-    throw new DiscogsAuthError(`Discogs refused our token (${res.status}) for ${path}: ${body}`);
+    throw new DiscogsAuthError(
+      `Discogs refused our token (${res.status}) for ${path}: ${await res.text()}`,
+    );
   }
   if (res.status >= 500) {
     throw new DiscogsTransientError(`Discogs API error ${res.status} for ${path}`);
@@ -87,20 +80,6 @@ export function getRelease(releaseId: number) {
 
 export function getMaster(masterId: number) {
   return discogsGet<DiscogsMaster>(`/masters/${masterId}`);
-}
-
-export function getUserProfile(username: string) {
-  return discogsGet<DiscogsUserProfile>(`/users/${encodeURIComponent(username)}`);
-}
-
-export function getInventory(
-  username: string,
-  page: number,
-  scan: { sort: string; order: string } = { sort: "artist", order: "asc" },
-) {
-  return discogsGet<DiscogsInventoryPage>(
-    `/users/${encodeURIComponent(username)}/inventory?page=${page}&per_page=100&sort=${scan.sort}&sort_order=${scan.order}`,
-  );
 }
 
 function getMasterVersionsPage(masterId: number, page: number) {

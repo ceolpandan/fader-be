@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "../db/client";
 import { isFadedFor, isNotFadedFor } from "../db/fades";
 import { releases } from "../db/schema";
-import type { ReleaseFacetsDto, ReleaseListPageDto } from "../dto/seller.dto";
+import type { ReleaseFacetsDto, ReleaseListPageDto } from "../dto/release-list.dto";
 import { mapReleaseRowToDto } from "../dto/mappers";
 import {
   NonRetryableError,

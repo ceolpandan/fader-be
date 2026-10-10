@@ -31,8 +31,8 @@ describe("discogs_queue_jobs table", () => {
       .insert(discogsQueueJobs)
       .values({
         runId: "run-1",
-        type: "inventory_page",
-        payload: { username: "some-seller", page: 1, runStartedAt: now.toISOString() },
+        type: "fade_lookup",
+        payload: { uid: "u", kind: "release", id: 1 },
         createdAt: now,
         updatedAt: now,
       })
@@ -54,8 +54,8 @@ describe("discogs_queue_jobs table", () => {
     expect(result).toEqual({
       id: inserted!.id,
       runId: "run-1",
-      type: "inventory_page",
-      payload: { username: "some-seller", page: 1, runStartedAt: now.toISOString() },
+      type: "fade_lookup",
+      payload: { uid: "u", kind: "release", id: 1 },
       status: "pending",
       priority: 0,
       attempts: 0,
