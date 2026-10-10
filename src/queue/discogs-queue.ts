@@ -4,7 +4,7 @@ import { discogsQueueJobs, type QueueJobPayloadMap, type QueueJobType } from "..
 import { DiscogsAuthError, DiscogsTransientError } from "../discogs-client";
 import { logger, highlightId } from "../util/logger";
 
-export const PACING_MS = 1300;
+export const PACING_MS = 1100;
 export const MAX_ATTEMPTS = 3;
 /** Priority for work a user is actively waiting on (vs. 0 for background indexing). */
 export const INLINE_PRIORITY = 10;

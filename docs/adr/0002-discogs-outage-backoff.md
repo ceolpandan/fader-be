@@ -2,7 +2,7 @@
 
 An overnight index of a big seller must survive Discogs hiccups instead of failing every job in an outage (fader-ui#41, which superseded aborting a run on a 429).
 
-On a 429, 5xx or network failure the Discogs queue pauses and retries the same job after 1, 2, 4, 8, then 10 minutes (the cap), or after `Retry-After` when that is longer. A paused retry does not use up the job's attempts, and a success resets the backoff. A 404 stays a permanent per-job failure. The 1.3s pacing between jobs is separate.
+On a 429, 5xx or network failure the Discogs queue pauses and retries the same job after 1, 2, 4, 8, then 10 minutes (the cap), or after `Retry-After` when that is longer. A paused retry does not use up the job's attempts, and a success resets the backoff. A 404 stays a permanent per-job failure. The 1.1s pacing between jobs is separate.
 
 - **State is in memory.** After a restart stuck jobs return to `pending` and the backoff starts over.
 - **Inline requests fail fast** with 503 "Discogs unavailable, retrying" while paused, instead of waiting and timing out with 504.
