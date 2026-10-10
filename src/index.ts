@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createApp } from "./app";
 import { createDb } from "./db/client";
-import { getInventory, getRelease, getUserProfile } from "./discogs-client";
+import { getAllMasterVersionReleaseIds, getInventory, getRelease, getUserProfile } from "./discogs-client";
+import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
 import { createInventoryPageHandler } from "./indexing/inventory-page-handler";
 import { createSellerProfileHandler } from "./indexing/seller-profile-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
@@ -41,6 +42,16 @@ queue.registerHandler(
   "seller_profile",
   createSellerProfileHandler({ db, enqueue: (job) => queue.enqueue(job), getUserProfile }),
 );
+queue.registerHandler(
+  "fade_lookup",
+  createFadeLookupHandler({
+    db,
+    enqueue: (job) => queue.enqueue(job),
+    getRelease,
+    getMasterVersionReleaseIds: getAllMasterVersionReleaseIds,
+  }),
+);
+queue.onSettled((job) => markFadeLookupFailed(db, job));
 queue.onSettled((job) => checkRunCompletion(db, job.runId));
 queue.onRunAborted((runId) => markRunAborted(db, runId));
 queue.start();

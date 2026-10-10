@@ -251,7 +251,9 @@ paths:
       description: >
         Faded masters and releases without a master. A release is hidden when
         its own id is in releaseIds or its master id is in masterIds, which
-        also covers versions added to a faded master later.
+        also covers versions added to a faded master later. versionReleaseIds
+        lists the versions of the faded masters found so far, and
+        failedLookups the fades Discogs could not resolve.
       responses:
         "200":
           description: Faded ids
@@ -262,9 +264,13 @@ paths:
     post:
       operationId: fade
       summary: >
-        Fade a release or a master for the signed-in user. A release with a
-        master is stored as that master, hiding every version under it.
-        Idempotent.
+        Fade a release or a master for the signed-in user. Answers at once; any
+        release or master can be faded, indexed or not. A release with a known
+        master is stored as that master, hiding every version under it. Any
+        other release is stored as itself, and a background lookup (queued
+        ahead of scans and enrichment) upgrades it to its master and stores
+        the master's versions. lookupStatus tells where that stands. Fading a
+        failed fade again retries its lookup. Otherwise idempotent.
       requestBody:
         required: true
         content:
@@ -284,17 +290,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
-        "404":
-          description: Release is not indexed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
     delete:
       operationId: unfade
       summary: >
         Unfade a release or a master for the signed-in user. A release with a
-        master unfades that master and every version under it. Idempotent.
+        master unfades that master and every version under it. Releases that
+        the fade kept out of enrichment are queued for enrichment again, unless
+        another fade of the user still covers them. Idempotent.
       requestBody:
         required: true
         content:
@@ -1267,13 +1269,20 @@ components:
 
     FadeResponseDto:
       type: object
-      required: [kind, id]
+      required: [kind, id, lookupStatus]
       properties:
         kind:
           type: string
           enum: [master, release]
         id:
           type: integer
+        lookupStatus:
+          type: string
+          enum: [pending, done, failed]
+          description: >
+            pending until the master and its versions are known, done once they
+            are (or the release has no master), failed when Discogs could not
+            resolve it.
 
     SettingsDto:
       type: object
@@ -1340,7 +1349,7 @@ components:
 
     FadedIdsDto:
       type: object
-      required: [masterIds, releaseIds]
+      required: [masterIds, releaseIds, versionReleaseIds, failedLookups]
       properties:
         masterIds:
           type: array
@@ -1348,6 +1357,22 @@ components:
         releaseIds:
           type: array
           items: { type: integer }
+        versionReleaseIds:
+          type: array
+          items: { type: integer }
+          description: Release ids under the faded masters, as far as their lookups have run.
+        failedLookups:
+          type: array
+          description: Fades Discogs could not resolve. They stay in place; fading again retries.
+          items:
+            type: object
+            required: [kind, id]
+            properties:
+              kind:
+                type: string
+                enum: [master, release]
+              id:
+                type: integer
 
     Artist:
       type: object

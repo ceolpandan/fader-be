@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
+import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { fades, releases, sellerInventory } from "../db/schema";
-import { DiscogsQueue } from "../queue/discogs-queue";
+import { discogsQueueJobs, fades, masterVersions, releases, sellerInventory } from "../db/schema";
+import { DiscogsQueue, INLINE_PRIORITY } from "../queue/discogs-queue";
 import { createApp } from "../app";
 
 const { verifyIdToken } = vi.hoisted(() => ({ verifyIdToken: vi.fn() }));
@@ -78,6 +79,9 @@ describe("fade", () => {
       .run();
   }
 
+  const lookupJobs = () =>
+    db.select().from(discogsQueueJobs).where(eq(discogsQueueJobs.type, "fade_lookup")).all();
+
   beforeEach(() => {
     dbPath = path.join(os.tmpdir(), `fader-test-${Date.now()}-${Math.random()}.sqlite`);
     db = createDb(dbPath);
@@ -107,7 +111,7 @@ describe("fade", () => {
       const res = await asUser(app, "u1").post("/fade").send({ releaseId: 111 });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ kind: "master", id: 900 });
+      expect(res.body).toEqual({ kind: "master", id: 900, lookupStatus: "pending" });
       expect(db.select().from(fades).all()).toMatchObject([{ uid: "u1", kind: "master", id: 900 }]);
     });
 
@@ -116,13 +120,14 @@ describe("fade", () => {
 
       const res = await asUser(app, "u1").post("/fade").send({ releaseId: 555 });
 
-      expect(res.body).toEqual({ kind: "release", id: 555 });
+      expect(res.body).toEqual({ kind: "release", id: 555, lookupStatus: "done" });
+      expect(lookupJobs()).toEqual([]);
     });
 
     it("stores a master directly", async () => {
       const res = await asUser(app, "u1").post("/fade").send({ masterId: 900 });
 
-      expect(res.body).toEqual({ kind: "master", id: 900 });
+      expect(res.body).toEqual({ kind: "master", id: 900, lookupStatus: "pending" });
     });
 
     it("is idempotent", async () => {
@@ -136,10 +141,53 @@ describe("fade", () => {
       expect(db.select().from(fades).all()).toHaveLength(1);
     });
 
-    it("returns 404 for a release that isn't indexed", async () => {
+    it("fades a release that isn't indexed at once and queues a lookup for it", async () => {
       const res = await asUser(app, "u1").post("/fade").send({ releaseId: 999 });
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ kind: "release", id: 999, lookupStatus: "pending" });
+      expect(lookupJobs()).toMatchObject([
+        {
+          runId: "fade:u1:999",
+          priority: INLINE_PRIORITY,
+          payload: { uid: "u1", kind: "release", id: 999 },
+        },
+      ]);
+    });
+
+    it("queues one lookup per master fade, and none while one is pending", async () => {
+      await asUser(app, "u1").post("/fade").send({ masterId: 900 });
+      await asUser(app, "u1").post("/fade").send({ masterId: 900 });
+
+      expect(lookupJobs()).toHaveLength(1);
+    });
+
+    it("needs no lookup when the master's versions are already stored", async () => {
+      db.insert(masterVersions).values({ masterId: 900, releaseId: 111 }).run();
+
+      const res = await asUser(app, "u2").post("/fade").send({ masterId: 900 });
+
+      expect(res.body).toEqual({ kind: "master", id: 900, lookupStatus: "done" });
+      expect(lookupJobs()).toEqual([]);
+    });
+
+    it("fades the master of a release found in a stored version list", async () => {
+      db.insert(masterVersions).values({ masterId: 900, releaseId: 111 }).run();
+
+      const res = await asUser(app, "u1").post("/fade").send({ releaseId: 111 });
+
+      expect(res.body).toEqual({ kind: "master", id: 900, lookupStatus: "done" });
+    });
+
+    it("retries a failed lookup when the item is faded again", async () => {
+      db.insert(fades)
+        .values({ uid: "u1", kind: "release", id: 999, createdAt: new Date(), lookupStatus: "failed" })
+        .run();
+
+      const res = await asUser(app, "u1").post("/fade").send({ releaseId: 999 });
+
+      expect(res.body).toEqual({ kind: "release", id: 999, lookupStatus: "pending" });
+      expect(lookupJobs()).toHaveLength(1);
     });
 
     it("returns 400 unless exactly one valid id is given", async () => {
@@ -164,7 +212,31 @@ describe("fade", () => {
 
       expect(res.status).toBe(200);
       expect(res.headers["cache-control"]).toBe("no-store");
-      expect(res.body).toEqual({ masterIds: [900], releaseIds: [555] });
+      expect(res.body).toEqual({
+        masterIds: [900],
+        releaseIds: [555],
+        versionReleaseIds: [],
+        failedLookups: [],
+      });
+    });
+
+    it("adds the stored versions of faded masters and lists failed lookups", async () => {
+      db.insert(masterVersions)
+        .values([
+          { masterId: 900, releaseId: 111 },
+          { masterId: 900, releaseId: 112 },
+          { masterId: 800, releaseId: 222 },
+        ])
+        .run();
+      await asUser(app, "u1").post("/fade").send({ masterId: 900 });
+      db.insert(fades)
+        .values({ uid: "u1", kind: "release", id: 999, createdAt: new Date(), lookupStatus: "failed" })
+        .run();
+
+      const res = await asUser(app, "u1").get("/fade");
+
+      expect(res.body.versionReleaseIds.sort()).toEqual([111, 112]);
+      expect(res.body.failedLookups).toEqual([{ kind: "release", id: 999 }]);
     });
   });
 
@@ -198,6 +270,48 @@ describe("fade", () => {
       await asUser(app, "u1").delete("/fade").send({ releaseId: 555 });
 
       expect(db.select().from(fades).all()).toEqual([]);
+    });
+
+    it("re-queues enrichment for covered inventory releases that were never enriched", async () => {
+      db.insert(masterVersions)
+        .values([
+          { masterId: 900, releaseId: 111 },
+          { masterId: 900, releaseId: 112 },
+          { masterId: 900, releaseId: 113 },
+        ])
+        .run();
+      seedRelease(112, 900);
+      seedInventory("seller-a", 111);
+      seedInventory("seller-a", 112);
+      seedInventory("seller-a", 113);
+      await asUser(app, "u1").post("/fade").send({ masterId: 900 });
+      db.insert(fades).values({ uid: "u1", kind: "release", id: 113, createdAt: new Date() }).run();
+      queue.enqueue({ runId: "run-x", type: "release_detail", payload: { releaseId: 111 } });
+
+      await asUser(app, "u1").delete("/fade").send({ masterId: 900 });
+
+      const details = db
+        .select()
+        .from(discogsQueueJobs)
+        .where(eq(discogsQueueJobs.type, "release_detail"))
+        .all();
+      // 111 is already queued, 112 is enriched, 113 is still faded as a release itself.
+      expect(details).toHaveLength(1);
+    });
+
+    it("queues enrichment for a covered release once nothing covers it", async () => {
+      db.insert(masterVersions).values({ masterId: 900, releaseId: 111 }).run();
+      seedInventory("seller-a", 111);
+      await asUser(app, "u1").post("/fade").send({ masterId: 900 });
+
+      await asUser(app, "u1").delete("/fade").send({ masterId: 900 });
+
+      const details = db
+        .select()
+        .from(discogsQueueJobs)
+        .where(eq(discogsQueueJobs.type, "release_detail"))
+        .all();
+      expect(details).toMatchObject([{ priority: 0, payload: { releaseId: 111 } }]);
     });
 
     it("leaves other collectors' fades alone and is idempotent", async () => {

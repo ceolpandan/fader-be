@@ -1,4 +1,4 @@
-import type { FadeKind, ReleaseArtistStub } from "../db/schema";
+import type { FadeKind, FadeLookupStatus, ReleaseArtistStub } from "../db/schema";
 
 /** Provide exactly one of releaseId or masterId. */
 export interface FadeRequestDto {
@@ -6,15 +6,23 @@ export interface FadeRequestDto {
   masterId?: number;
 }
 
-/** The stored fade: the master when the release has one, otherwise the release itself. */
+/**
+ * The stored fade: the master when the release is known to have one, otherwise the release
+ * itself (a release we haven't resolved yet is upgraded to its master by the lookup).
+ */
 export interface FadeResponseDto {
   kind: FadeKind;
   id: number;
+  lookupStatus: FadeLookupStatus;
 }
 
 export interface FadedIdsDto {
   masterIds: number[];
   releaseIds: number[];
+  /** Release ids under the faded masters, as far as their lookups have run. */
+  versionReleaseIds: number[];
+  /** Fades Discogs could not resolve. They stay in place; fading again retries. */
+  failedLookups: { kind: FadeKind; id: number }[];
 }
 
 /** One stored fade, with the lowest-id indexed release it hides (null fields when none is indexed). */

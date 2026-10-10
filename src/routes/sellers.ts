@@ -198,7 +198,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
   });
 
   /** Run the already-known seller again: one transaction, so a crash can't leave it `running` with no job. */
-  function restartRun(username: string): string {
+  function restartRun(username: string, uid: string): string {
     const runId = randomUUID();
     const runStartedAt = new Date().toISOString();
 
@@ -220,7 +220,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
       deps.queue.enqueue({
         runId,
         type: "inventory_page",
-        payload: { username, page: 1, runStartedAt },
+        payload: { username, page: 1, runStartedAt, uid },
         priority: SCAN_PRIORITY,
       });
     });
@@ -246,7 +246,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
         res.status(409).json({ error: `Indexing is already running for ${existing.username}` });
         return;
       }
-      const dto: IndexStartedDto = { username: existing.username, runId: restartRun(existing.username) };
+      const dto: IndexStartedDto = { username: existing.username, runId: restartRun(existing.username, req.user!.uid) };
       res.status(202).json(dto);
       return;
     }
@@ -255,7 +255,7 @@ export function createSellersRouter(deps: SellersRouterDeps): Router {
     // Seller (under Discogs' casing) and starts the run under this id.
     const runId = randomUUID();
     try {
-      await deps.queue.enqueueAndWait({ runId, type: "seller_profile", payload: { username: typed } });
+      await deps.queue.enqueueAndWait({ runId, type: "seller_profile", payload: { username: typed, uid: req.user!.uid } });
     } catch (err) {
       if (err instanceof NonRetryableError) {
         res.status(404).json({ error: `No Discogs user named '${typed}'` });
