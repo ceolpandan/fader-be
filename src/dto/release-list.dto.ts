@@ -32,6 +32,4 @@ export interface ReleaseListPageDto {
   total: number;
   /** How many releases the signed-in user has faded. Ignores filters. */
   fadedCount: number;
-  /** With `enriched=only`: every enriched release the user can see, whatever the other filters. */
-  enrichedCount?: number;
 }

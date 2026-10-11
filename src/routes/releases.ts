@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "../db/client";
 import { isFadedViaFades, isNotFadedFor } from "../db/fades";
 import { getDiscogsToken } from "../db/discogs-tokens";
-import { isEnriched } from "../db/enriched";
 import { isNotMissing } from "../db/missing";
 import { filterOptions, releases, type FilterOptionKind } from "../db/schema";
 import type { ReleaseFilterOptionsDto, ReleaseListPageDto } from "../dto/release-list.dto";
@@ -102,9 +101,6 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       total,
       fadedCount: countReleases(isNotMissing, isFadedViaFades(uid)),
     };
-    if (req.query.enriched === "only") {
-      dto.enrichedCount = countReleases(isNotMissing, isNotFadedFor(uid), isEnriched);
-    }
     res.json(dto);
   });
 

@@ -140,7 +140,6 @@ describe("GET /releases and /releases/filter-options", () => {
 
       const filtered = await get("/releases?genre=Jazz");
       expect(filtered.body.total).toBe(2);
-      expect(filtered.body.enrichedCount).toBeUndefined();
     });
 
     it("searches the title and the artist names: every word must match, in any case", async () => {
@@ -159,26 +158,15 @@ describe("GET /releases and /releases/filter-options", () => {
       expect((await get(`/releases?q=${"a".repeat(201)}`)).status).toBe(400);
     });
 
-    it("keeps only enriched releases with enriched=only, and counts them whatever the other filters", async () => {
-      seedRelease(1, "Rock enriched", { genres: ["Rock"] });
-      seedRelease(2, "Jazz enriched", { genres: ["Jazz"] });
-      seedRelease(3, "Rock never", { genres: ["Rock"] });
-      seedRelease(4, "Faded enriched");
-      seedRelease(5, "Missing enriched");
-      markEnriched(1, 2, 4, 5);
-      db.insert(fades).values({ uid: "test-uid", kind: "release", id: 4, createdAt: new Date() }).run();
-      db.update(releases).set({ missingAt: new Date() }).where(eq(releases.id, 5)).run();
+    it("ignores an enriched parameter from an older client", async () => {
+      seedRelease(1, "Enriched");
+      seedRelease(2, "Never");
+      markEnriched(1);
 
-      const all = await get("/releases?enriched=only");
-      expect(titles(all.body)).toEqual(["Jazz enriched", "Rock enriched"]);
-      expect(all.body.enrichedCount).toBe(2);
-
-      const rock = await get("/releases?enriched=only&genre=Rock&q=enriched");
-      expect(titles(rock.body)).toEqual(["Rock enriched"]);
-      expect(rock.body).toMatchObject({ total: 1, enrichedCount: 2 });
-
-      expect((await get("/releases")).body.enrichedCount).toBeUndefined();
-      expect((await get("/releases?enriched=all")).status).toBe(400);
+      const res = await get("/releases?enriched=only");
+      expect(res.status).toBe(200);
+      expect(titles(res.body)).toEqual(["Enriched", "Never"]);
+      expect(res.body.enrichedCount).toBeUndefined();
     });
 
     it("sorts, with the descending prefix", async () => {

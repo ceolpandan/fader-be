@@ -1,6 +1,5 @@
 import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import type { Request } from "express";
-import { isEnriched } from "../db/enriched";
 import { releaseFormats, releaseGenres, releaseStyles, releases } from "../db/schema";
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks"] as const;
@@ -184,14 +183,11 @@ export function parseReleaseQuery(req: Pick<Request, "query">): { query: Release
     return { error: "noLinks must be one of only, exclude" };
   }
 
-  const enriched = req.query.enriched;
-  if (enriched !== undefined && enriched !== "only") return { error: "enriched must be only" };
   const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (search.length > MAX_SEARCH_LENGTH) return { error: `q must be at most ${MAX_SEARCH_LENGTH} characters` };
 
   const filters: SQL[] = [];
   if (search.length > 0) filters.push(searchFilter(search));
-  if (enriched === "only") filters.push(isEnriched);
   if (genre.length > 0) filters.push(hasAny("genre", genre));
   if (style.length > 0) filters.push(hasAny("style", style));
   if (format.length > 0) filters.push(hasAny("format", format));
