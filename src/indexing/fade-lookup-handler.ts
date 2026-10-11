@@ -19,8 +19,10 @@ import type { DiscogsRelease } from "../types/discogs-api";
 export interface FadeLookupHandlerDeps {
   db: Db;
   enqueue: (job: EnqueueInput) => number;
-  getRelease: (releaseId: number) => Promise<DiscogsRelease>;
-  getMasterVersionReleaseIds: (masterId: number) => Promise<number[]>;
+  /** The collector's Discogs token, or null when they have none (the lookup then fails). */
+  getToken: (uid: string) => string | null;
+  getRelease: (releaseId: number, token: string) => Promise<DiscogsRelease>;
+  getMasterVersionReleaseIds: (masterId: number, token: string) => Promise<number[]>;
 }
 
 /** Queue run id of a fade's lookup, kept apart from every other run. */
@@ -81,10 +83,13 @@ export function createFadeLookupHandler(
       .all();
     if (!fade) return; // Unfaded while the lookup waited.
 
+    const token = deps.getToken(uid);
+    if (!token) throw new NonRetryableError("No Discogs token saved");
+
     if (kind === "release") {
       let release: DiscogsRelease;
       try {
-        release = await deps.getRelease(id);
+        release = await deps.getRelease(id, token);
       } catch (err) {
         if (err instanceof DiscogsNotFoundError)
           throw new NonRetryableError(err.message);
@@ -133,7 +138,7 @@ export function createFadeLookupHandler(
     if (!hasStoredVersions(deps.db, id)) {
       let versionIds: number[];
       try {
-        versionIds = await deps.getMasterVersionReleaseIds(id);
+        versionIds = await deps.getMasterVersionReleaseIds(id, token);
       } catch (err) {
         if (err instanceof DiscogsNotFoundError)
           throw new NonRetryableError(err.message);

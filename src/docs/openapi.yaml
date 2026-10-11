@@ -183,7 +183,9 @@ paths:
         so the answer names the fade and counts what it hides. If the wait
         runs out, or Discogs is paused, lookupStatus is pending, versionCount
         is null and the lookup carries on in the background. Fading a failed
-        fade again retries its lookup. Otherwise idempotent.
+        fade again retries its lookup. Otherwise idempotent. A fade that needs
+        a Discogs lookup uses the signed-in user's own Discogs token, so
+        without one it is refused with 409 and nothing is stored.
       requestBody:
         required: true
         content:
@@ -199,6 +201,14 @@ paths:
                 $ref: "#/components/schemas/FadeResponseDto"
         "400":
           description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: >
+            The fade needs a Discogs lookup and the user has no Discogs token
+            (code token_required). Nothing is stored.
           content:
             application/json:
               schema:
@@ -351,6 +361,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /settings/discogs-token:
+    get:
+      operationId: getDiscogsToken
+      summary: Whether the signed-in user has a Discogs token stored
+      description: The token itself is never returned.
+      responses:
+        "200":
+          description: Token status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscogsTokenDto"
+    put:
+      operationId: setDiscogsToken
+      summary: Store the signed-in user's Discogs personal access token
+      description: >
+        Checks the token with Discogs (GET /oauth/identity) and, when Discogs
+        accepts it, stores it encrypted, replacing any earlier one. The token
+        can never be read back, only replaced or removed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetDiscogsTokenRequestDto"
+      responses:
+        "200":
+          description: The token is stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscogsTokenDto"
+        "400":
+          description: The token is empty, too long, or Discogs did not accept it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Discogs could not be reached to check the token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: The server has no TOKEN_ENCRYPTION_KEY, so it cannot store tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+    delete:
+      operationId: deleteDiscogsToken
+      summary: Remove the signed-in user's Discogs token
+      description: Succeeds whether or not a token was stored.
+      responses:
+        "204":
+          description: No token is stored any more
   /settings:
     get:
       operationId: getSettings
@@ -415,6 +482,12 @@ paths:
                 $ref: "#/components/schemas/ErrorDto"
         "404":
           description: Master not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: The user has no Discogs token, or Discogs rejected it
           content:
             application/json:
               schema:
@@ -510,6 +583,9 @@ components:
       properties:
         error:
           type: string
+        code:
+          type: string
+          description: A stable machine-readable reason, set only where documented (for example token_required).
 
     ReleaseFormatDto:
       type: object
@@ -659,6 +735,25 @@ components:
           type: string
           maxLength: 200
           description: Trimmed; must not be empty.
+
+    DiscogsTokenDto:
+      type: object
+      required: [set, username]
+      properties:
+        set: { type: boolean }
+        username:
+          type: string
+          nullable: true
+          description: The Discogs account the token belongs to; null when none is set.
+
+    SetDiscogsTokenRequestDto:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          maxLength: 200
+          description: A Discogs personal access token. Trimmed; must not be empty.
 
     SettingsDto:
       type: object

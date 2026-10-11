@@ -2,6 +2,7 @@ import { and, eq, sql, type SQL } from "drizzle-orm";
 import { Router, type Response } from "express";
 import type { Db } from "../db/client";
 import { isFadedViaFades, isNotFadedFor } from "../db/fades";
+import { isNotMissing } from "../db/missing";
 import { filterOptions, releases, type FilterOptionKind } from "../db/schema";
 import type { ReleaseFilterOptionsDto, ReleaseListPageDto } from "../dto/release-list.dto";
 import { mapReleaseRowToDto } from "../dto/mappers";
@@ -59,7 +60,7 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
     const { page, pageSize, styleCombinations, orderBy } = parsed.query;
     const filters = styleCombinations ? [...parsed.query.filters, styleCombinations] : parsed.query.filters;
 
-    const total = countReleases(isNotFadedFor(uid), ...filters);
+    const total = countReleases(isNotMissing, isNotFadedFor(uid), ...filters);
     const rows = deps.db
       .select({
         releaseId: releases.id,
@@ -72,7 +73,7 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
         artists: releases.artists,
       })
       .from(releases)
-      .where(and(isNotFadedFor(uid), ...filters))
+      .where(and(isNotMissing, isNotFadedFor(uid), ...filters))
       .orderBy(...orderBy)
       .limit(pageSize)
       .offset((page - 1) * pageSize)
@@ -83,7 +84,7 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       page,
       pageSize,
       total,
-      fadedCount: countReleases(isFadedViaFades(uid)),
+      fadedCount: countReleases(isNotMissing, isFadedViaFades(uid)),
     };
     res.json(dto);
   });

@@ -113,10 +113,11 @@ describe("importDump", () => {
     expect(stats.kept).toBe(3);
   });
 
-  it("carries over only fades, user settings and saved filters from the old database", async () => {
+  it("carries over fades, user settings, saved filters, tokens and releases from the old database", async () => {
     await importDump({ dumpPath: path.join(dir, "releases.xml"), outPath: path.join(dir, "old.sqlite") });
     const old = new Database(path.join(dir, "old.sqlite"));
     old.exec(`
+      INSERT INTO discogs_tokens (uid, token_encrypted, username, created_at) VALUES ('u1', 'v1.a.b.c', 'dan', 400);
       INSERT INTO saved_filters (id, uid, name, query, created_at) VALUES (7, 'u1', 'Dub', 'tracks=2&sort=-year', 300);
       INSERT INTO fades (uid, kind, id, created_at, lookup_status, title) VALUES ('u1', 'master', 1660109, 100, 'done', 'Stockholm');
       INSERT INTO user_settings (uid, theme, updated_at) VALUES ('u1', 'light', 200);
@@ -139,7 +140,71 @@ describe("importDump", () => {
     expect(db.prepare("SELECT id, uid, name, query FROM saved_filters").all()).toEqual([
       { id: 7, uid: "u1", name: "Dub", query: "tracks=2&sort=-year" },
     ]);
-    expect(db.prepare("SELECT count(*) c FROM releases WHERE id = 99").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT uid, token_encrypted FROM discogs_tokens").all()).toEqual([{ uid: "u1", token_encrypted: "v1.a.b.c" }]);
+    expect(db.prepare("SELECT count(*) c FROM releases WHERE id = 99").get()).toEqual({ c: 1 });
+    db.close();
+  });
+
+  it("keeps every existing release as it is, enriched or not, and only adds the new ones", async () => {
+    await importDump({ dumpPath: path.join(dir, "releases.xml"), outPath: path.join(dir, "old.sqlite") });
+    const old = new Database(path.join(dir, "old.sqlite"));
+    old.exec(`
+      UPDATE releases SET title = 'Refreshed title', rating_average = 4.5, rating_count = 12, enriched_at = 500 WHERE id = 1;
+      UPDATE releases SET title = 'Stale but kept', missing_at = 600 WHERE id = 3;
+      DELETE FROM releases WHERE id = 4;
+      INSERT INTO master_versions (master_id, release_id) VALUES (1660109, 777);
+      INSERT INTO releases (id, title, genres, styles, formats, artists) VALUES (99, 'Gone from the dump', '["Electronic"]', '["Dub"]', '[]', '[]');
+    `);
+    old.close();
+
+    const stats = await importDump({
+      dumpPath: path.join(dir, "releases.xml"),
+      outPath: path.join(dir, "new.sqlite"),
+      carryOverFrom: path.join(dir, "old.sqlite"),
+    });
+
+    expect(stats).toMatchObject({ kept: 3, releasesCarried: 3, releasesAdded: 1 });
+    const db = open("new.sqlite");
+    expect(db.prepare("SELECT id, title, rating_average, rating_count, enriched_at, missing_at FROM releases ORDER BY id").all()).toEqual([
+      { id: 1, title: "Refreshed title", rating_average: 4.5, rating_count: 12, enriched_at: 500, missing_at: null },
+      { id: 3, title: "Stale but kept", rating_average: null, rating_count: null, enriched_at: null, missing_at: 600 },
+      { id: 4, title: "Repeated Values", rating_average: null, rating_count: null, enriched_at: null, missing_at: null },
+      { id: 99, title: "Gone from the dump", rating_average: null, rating_count: null, enriched_at: null, missing_at: null },
+    ]);
+    // Side tables follow the copied rows, and the versions fade lookups stored come along.
+    expect(db.prepare("SELECT style FROM release_styles WHERE release_id = 99").all()).toEqual([{ style: "Dub" }]);
+    expect(db.prepare("SELECT release_id FROM master_versions WHERE master_id = 1660109 ORDER BY release_id").all()).toEqual([
+      { release_id: 1 },
+      { release_id: 777 },
+    ]);
+    db.close();
+  });
+
+  it("carries over from a database that predates the enrichment columns", async () => {
+    await importDump({ dumpPath: path.join(dir, "releases.xml"), outPath: path.join(dir, "old.sqlite") });
+    const old = new Database(path.join(dir, "old.sqlite"));
+    old.exec(`
+      DROP INDEX releases_rating_idx;
+      ALTER TABLE releases DROP COLUMN rating_average;
+      ALTER TABLE releases DROP COLUMN rating_count;
+      ALTER TABLE releases DROP COLUMN enriched_at;
+      ALTER TABLE releases DROP COLUMN missing_at;
+      UPDATE releases SET title = 'Old title' WHERE id = 1;
+    `);
+    old.close();
+
+    await importDump({
+      dumpPath: path.join(dir, "releases.xml"),
+      outPath: path.join(dir, "new.sqlite"),
+      carryOverFrom: path.join(dir, "old.sqlite"),
+    });
+
+    const db = open("new.sqlite");
+    expect(db.prepare("SELECT title, rating_average, missing_at FROM releases WHERE id = 1").get()).toEqual({
+      title: "Old title",
+      rating_average: null,
+      missing_at: null,
+    });
     db.close();
   });
 

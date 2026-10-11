@@ -169,6 +169,27 @@
       "when": 1791709132879,
       "tag": "0023_saved_filters",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1791710145702,
+      "tag": "0024_discogs_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791710552440,
+      "tag": "0025_queue_lanes",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1791710877270,
+      "tag": "0026_release_enrichment_columns",
+      "breakpoints": true
     }
   ]
 }

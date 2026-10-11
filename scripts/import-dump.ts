@@ -1,7 +1,7 @@
 import { importDump } from "../src/import/import-dump";
 
 const usage = `Usage: npm run db:import -- <releases.xml|releases.xml.gz> <new-db.sqlite> [options]
-  --carry-over <old.sqlite>   copy fades and user settings from an existing database
+  --carry-over <old.sqlite>   keep the releases of an existing database (the dump only adds new ones) and copy its fades, settings, saved filters and tokens
   --sample <chunks>[x<MB>]    sample evenly spaced chunks (6 MB each by default) instead of the whole file
   --genre <name>              keep releases with this genre (default Electronic)
   --force                     replace the new database file if it exists`;

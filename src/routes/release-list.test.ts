@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
+import { inArray } from "drizzle-orm";
 import { createDb, type Db } from "../db/client";
 import { rebuildFilterOptions } from "../db/filter-options";
 import { fades, releases } from "../db/schema";
@@ -195,6 +196,30 @@ describe("GET /releases and /releases/filter-options", () => {
       const res = await get("/releases");
       expect(titles(res.body)).toEqual(["Kept"]);
       expect(res.body).toMatchObject({ total: 1, fadedCount: 2 });
+    });
+
+    it("hides releases an enrichment run found missing from the list and every count", async () => {
+      seedRelease(1, "Kept");
+      seedRelease(2, "Missing");
+      seedRelease(3, "Missing and faded");
+      const now = new Date();
+      db.update(releases).set({ missingAt: now }).where(inArray(releases.id, [2, 3])).run();
+      db.insert(fades).values({ uid: "test-uid", kind: "release", id: 3, createdAt: now }).run();
+
+      const res = await get("/releases");
+
+      expect(titles(res.body)).toEqual(["Kept"]);
+      expect(res.body).toMatchObject({ total: 1, fadedCount: 0 });
+    });
+
+    it("shows a release again once it is no longer missing", async () => {
+      seedRelease(1, "Back");
+      db.update(releases).set({ missingAt: new Date() }).run();
+      expect(titles((await get("/releases")).body)).toEqual([]);
+
+      db.update(releases).set({ missingAt: null }).run();
+
+      expect(titles((await get("/releases")).body)).toEqual(["Back"]);
     });
 
     it.each([

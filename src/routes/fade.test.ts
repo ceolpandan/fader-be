@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { discogsQueueJobs, fades, masterVersions, releases } from "../db/schema";
+import { discogsQueueJobs, discogsTokens, fades, masterVersions, releases } from "../db/schema";
 import { createFadeLookupHandler } from "../indexing/fade-lookup-handler";
 import { DiscogsQueue, INLINE_PRIORITY } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
@@ -82,6 +82,8 @@ describe("fade", () => {
     process.env.FIREBASE_PRIVATE_KEY = "test-key";
     process.env.ALLOWED_EMAILS = "dp.ceolpan@gmail.com";
     verifyIdToken.mockReset();
+    // u1 has a Discogs token; u2 and anyone else does not.
+    db.insert(discogsTokens).values({ uid: "u1", tokenEncrypted: "v1.x.y.z", username: "dan", createdAt: new Date() }).run();
   });
 
   afterEach(() => {
@@ -215,6 +217,7 @@ describe("fade", () => {
         const handler = createFadeLookupHandler({
           db,
           enqueue: (job) => queue.enqueue(job),
+          getToken: () => "tok",
           getRelease,
           getMasterVersionReleaseIds,
         });
@@ -342,6 +345,29 @@ describe("fade", () => {
     });
   });
 
+  describe("a collector without a Discogs token", () => {
+    it("cannot fade something that needs a Discogs lookup, and nothing is stored or queued", async () => {
+      seedRelease(111, 900);
+
+      const res = await asUser(app, "u2").post("/fade").send({ releaseId: 111 });
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe("token_required");
+      expect(db.select().from(fades).all()).toEqual([]);
+      expect(lookupJobs()).toEqual([]);
+    });
+
+    it("can still fade a master whose versions are already stored", async () => {
+      seedRelease(111, 900);
+      db.insert(masterVersions).values({ masterId: 900, releaseId: 111 }).run();
+
+      const res = await asUser(app, "u2").post("/fade").send({ releaseId: 111 });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ kind: "master", id: 900, lookupStatus: "done" });
+    });
+  });
+
   describe("DELETE /fade", () => {
     it("unfades a master, and every version with it", async () => {
       seedRelease(111, 900);
@@ -375,6 +401,7 @@ describe("fade", () => {
     });
 
     it("leaves other collectors' fades alone and is idempotent", async () => {
+      db.insert(discogsTokens).values({ uid: "u2", tokenEncrypted: "v1.x.y.z", username: "other", createdAt: new Date() }).run();
       await asUser(app, "u2").post("/fade").send({ masterId: 900 });
 
       const first = await asUser(app, "u1").delete("/fade").send({ masterId: 900 });

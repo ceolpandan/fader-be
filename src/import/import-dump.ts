@@ -19,7 +19,7 @@ export interface ImportOptions {
   genre?: string;
   /** Read only evenly spaced chunks of the file (plain `.xml` only), for a sample database. */
   sample?: { chunks: number; chunkBytes: number };
-  /** An existing database to carry the fades, user settings and saved filters over from. */
+  /** An existing database to carry the fades, user settings, saved filters and Discogs tokens over from. */
   carryOverFrom?: string;
   migrationsFolder?: string;
   log?: (message: string) => void;
@@ -30,6 +30,10 @@ export interface ImportStats {
   kept: number;
   masterVersions: number;
   fadesCarried: number;
+  /** Releases copied from the old database, which the dump never overwrites. */
+  releasesCarried: number;
+  /** Dump releases that were new to the database (the rest were already there). */
+  releasesAdded: number;
   seconds: number;
 }
 
@@ -37,9 +41,10 @@ const BATCH_SIZE = 20_000;
 const READ_BYTES = 8 * 1024 * 1024;
 
 /**
- * Builds a new database from the Discogs releases dump: the migrations, then every release with
- * the genre, then the indexes (built after the load, which is much faster). Only the fades, user
- * settings and saved filters are carried over from `carryOverFrom`. Swap the file in by pointing `DB_PATH` at
+ * Builds a new database from the Discogs releases dump: the migrations, then the old database's
+ * releases (when carrying over), then every dump release with the genre that is not there yet
+ * (existing rows always win), then the indexes (built after the load, which is much faster). Only the fades, user
+ * settings, saved filters and Discogs tokens are carried over from `carryOverFrom`. Swap the file in by pointing `DB_PATH` at
  * it with the API stopped.
  */
 export async function importDump(options: ImportOptions): Promise<ImportStats> {
@@ -68,19 +73,32 @@ export async function importDump(options: ImportOptions): Promise<ImportStats> {
     for (const index of indexes) sqlite.exec(`DROP INDEX "${index.name}"`);
 
     const insertRelease = sqlite.prepare(
-      `INSERT INTO releases (id, title, year, country, genres, styles, formats, master_id, labels, artists, tracklist, videos)
+      `INSERT OR IGNORE INTO releases (id, title, year, country, genres, styles, formats, master_id, labels, artists, tracklist, videos)
        VALUES (@id, @title, @year, @country, @genres, @styles, @formats, @masterId, @labels, @artists, @tracklist, @videos)`,
     );
     const insertMasterVersion = sqlite.prepare("INSERT OR IGNORE INTO master_versions (master_id, release_id) VALUES (?, ?)");
 
-    const stats: ImportStats = { scanned: 0, kept: 0, masterVersions: 0, fadesCarried: 0, seconds: 0 };
+    const stats: ImportStats = {
+      scanned: 0,
+      kept: 0,
+      masterVersions: 0,
+      fadesCarried: 0,
+      releasesCarried: 0,
+      releasesAdded: 0,
+      seconds: 0,
+    };
+    if (options.carryOverFrom) {
+      log(`Copying the releases of ${options.carryOverFrom}`);
+      stats.releasesCarried = carryOverReleases(sqlite, options.carryOverFrom);
+      log(`  ${stats.releasesCarried} releases copied`);
+    }
     let pending = 0;
     sqlite.exec("BEGIN");
     const onRelease = (release: DumpRelease): void => {
       stats.scanned++;
       if (!release.genres.includes(genre)) return;
       const row = toReleaseRow(release);
-      insertRelease.run({
+      const inserted = insertRelease.run({
         ...row,
         genres: JSON.stringify(row.genres),
         styles: JSON.stringify(row.styles),
@@ -91,6 +109,7 @@ export async function importDump(options: ImportOptions): Promise<ImportStats> {
         videos: JSON.stringify(row.videos),
       });
       stats.kept++;
+      stats.releasesAdded += inserted.changes;
       if (row.masterId) stats.masterVersions += insertMasterVersion.run(row.masterId, row.id).changes;
       if (++pending >= BATCH_SIZE) {
         sqlite.exec("COMMIT; BEGIN");
@@ -115,7 +134,7 @@ export async function importDump(options: ImportOptions): Promise<ImportStats> {
     sqlite.pragma("journal_mode = WAL");
     stats.seconds = (Date.now() - started) / 1000;
     log(
-      `Done in ${(stats.seconds / 60).toFixed(1)} min: ${stats.kept} releases, ${stats.masterVersions} master versions, ${stats.fadesCarried} fades carried over`,
+      `Done in ${(stats.seconds / 60).toFixed(1)} min: ${stats.releasesCarried} releases kept from the old database, ${stats.releasesAdded} added from the dump (${stats.kept} matched), ${stats.masterVersions} master versions, ${stats.fadesCarried} fades carried over`,
     );
     return stats;
   } finally {
@@ -123,12 +142,41 @@ export async function importDump(options: ImportOptions): Promise<ImportStats> {
   }
 }
 
-/** Copies `fades`, `user_settings` and `saved_filters`, by the columns both databases have. Returns the fades copied. */
+/**
+ * Copies the old database's releases, and the master versions fade lookups stored, into the new
+ * one before the dump loads. The dump then only adds releases that are not there yet, so an
+ * existing row, enriched or not, always wins. Only the columns both databases have are copied.
+ */
+function carryOverReleases(target: Database.Database, oldPath: string): number {
+  target.prepare("ATTACH DATABASE ? AS old").run(oldPath);
+  try {
+    const columns = (table: string, schema: string) =>
+      (target.prepare(`PRAGMA ${schema}.table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+    let releases = 0;
+    for (const table of ["releases", "master_versions"]) {
+      const inOld = columns(table, "old");
+      const list = columns(table, "main")
+        .filter((c) => inOld.includes(c))
+        .map((c) => `"${c}"`)
+        .join(", ");
+      if (!list) continue; // an older database without this table
+      const { changes } = target
+        .prepare(`INSERT OR IGNORE INTO main.${table} (${list}) SELECT ${list} FROM old.${table}`)
+        .run();
+      if (table === "releases") releases = changes;
+    }
+    return releases;
+  } finally {
+    target.exec("DETACH DATABASE old");
+  }
+}
+
+/** Copies `fades`, `user_settings`, `saved_filters` and `discogs_tokens`, by the columns both databases have. Returns the fades copied. */
 function carryOver(target: Database.Database, oldPath: string): number {
   target.prepare("ATTACH DATABASE ? AS old").run(oldPath);
   try {
     let fades = 0;
-    for (const table of ["fades", "user_settings", "saved_filters"]) {
+    for (const table of ["fades", "user_settings", "saved_filters", "discogs_tokens"]) {
       const columns = (schema: string) =>
         (target.prepare(`PRAGMA ${schema}.table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
       const inOld = columns("old");

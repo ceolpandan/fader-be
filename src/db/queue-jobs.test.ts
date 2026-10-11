@@ -53,6 +53,7 @@ describe("discogs_queue_jobs table", () => {
 
     expect(result).toEqual({
       id: inserted!.id,
+      uid: "",
       runId: "run-1",
       type: "fade_lookup",
       payload: { uid: "u", kind: "release", id: 1 },

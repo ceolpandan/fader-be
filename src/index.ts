@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createApp } from "./app";
 import { createDb } from "./db/client";
+import { getDiscogsToken } from "./db/discogs-tokens";
 import { getAllMasterVersionReleaseIds, getRelease } from "./discogs-client";
 import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
@@ -28,6 +29,7 @@ queue.registerHandler(
   createFadeLookupHandler({
     db,
     enqueue: (job) => queue.enqueue(job),
+    getToken: (uid) => getDiscogsToken(db, uid),
     getRelease,
     getMasterVersionReleaseIds: getAllMasterVersionReleaseIds,
   }),

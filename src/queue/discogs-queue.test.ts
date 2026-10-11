@@ -6,11 +6,12 @@ import os from "node:os";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs } from "../db/schema";
-import { DiscogsRateLimitError, DiscogsTransientError } from "../discogs-client";
+import { DiscogsAuthError, DiscogsRateLimitError, DiscogsTransientError } from "../discogs-client";
 import {
   DiscogsQueue,
   MAX_CAP_RETRIES,
   NonRetryableError,
+  QueueUnavailableError,
   PACING_MS,
   QueueWaitTimeoutError,
 } from "./discogs-queue";
@@ -406,19 +407,19 @@ describe("DiscogsQueue", () => {
 
       const waits: number[] = [];
       for (let call = 1; call <= 5; call++) {
-        const pause = queue.getPause()!;
+        const pause = queue.getPause("u")!;
         waits.push(Math.round((pause.retryAt.getTime() - Date.now()) / MIN));
         await vi.advanceTimersByTimeAsync(pause.backoffMs);
       }
       expect(waits).toEqual([1, 2, 4, 8, 10]);
       expect(handler).toHaveBeenCalledTimes(6);
-      expect(queue.getPause()).toBeNull();
+      expect(queue.getPause("u")).toBeNull();
 
       // the next failure starts over at 1 min
       queue.registerHandler("fade_lookup", flaky(1, new DiscogsTransientError("again")));
       queue.enqueue({ runId: "a", type: "fade_lookup", payload: { uid: "u", kind: "release", id: 2 } });
       await vi.advanceTimersByTimeAsync(PACING_MS);
-      expect(queue.getPause()!.backoffMs).toBe(MIN);
+      expect(queue.getPause("u")!.backoffMs).toBe(MIN);
     });
 
     it("waits for Retry-After when it is longer than the backoff step", async () => {
@@ -428,7 +429,7 @@ describe("DiscogsQueue", () => {
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(queue.getPause()!.backoffMs).toBe(5 * MIN);
+      expect(queue.getPause("u")!.backoffMs).toBe(5 * MIN);
     });
 
     it("ignores a Retry-After shorter than the backoff step", async () => {
@@ -438,7 +439,7 @@ describe("DiscogsQueue", () => {
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(queue.getPause()!.backoffMs).toBe(MIN);
+      expect(queue.getPause("u")!.backoffMs).toBe(MIN);
     });
 
     it("keeps failing a 404 permanently and does not pause", async () => {
@@ -451,7 +452,7 @@ describe("DiscogsQueue", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(status(id).status).toBe("failed");
-      expect(queue.getPause()).toBeNull();
+      expect(queue.getPause("u")).toBeNull();
     });
 
     it("gives up after MAX_CAP_RETRIES retries at the 10 min cap, failing every run's pending jobs", async () => {
@@ -469,7 +470,7 @@ describe("DiscogsQueue", () => {
       await vi.advanceTimersByTimeAsync(0);
       // failures 1-4 ramp up, then each of the next MAX_CAP_RETRIES failures is a retry at the cap
       for (let i = 0; i < 4 + MAX_CAP_RETRIES; i++) {
-        await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
+        await vi.advanceTimersByTimeAsync(queue.getPause("u")!.backoffMs);
       }
 
       expect(handler).toHaveBeenCalledTimes(5 + MAX_CAP_RETRIES);
@@ -478,7 +479,7 @@ describe("DiscogsQueue", () => {
       expect(status(otherRun).status).toBe("failed");
       expect(aborted).toHaveBeenCalledWith("a");
       expect(aborted).toHaveBeenCalledWith("b");
-      expect(queue.getPause()).toBeNull();
+      expect(queue.getPause("u")).toBeNull();
     });
 
     it("keeps retrying one job through repeated Discogs errors", async () => {
@@ -490,12 +491,155 @@ describe("DiscogsQueue", () => {
       queue.start();
       await vi.advanceTimersByTimeAsync(0);
       for (let i = 0; i < 4; i++) {
-        await vi.advanceTimersByTimeAsync(queue.getPause()!.backoffMs);
+        await vi.advanceTimersByTimeAsync(queue.getPause("u")!.backoffMs);
       }
 
       expect(status(id).status).toBe("pending");
     });
 
 
+  });
+});
+
+describe("DiscogsQueue lanes", () => {
+  let dbPath: string;
+  let db: Db;
+  let queue: DiscogsQueue;
+
+  beforeEach(() => {
+    dbPath = path.join(os.tmpdir(), `fader-test-${Date.now()}-${Math.random()}.sqlite`);
+    db = createDb(dbPath);
+    migrate(db, { migrationsFolder: "./drizzle" });
+    queue = new DiscogsQueue(db);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    queue.stop();
+    vi.useRealTimers();
+    db.$client.close();
+    for (const suffix of ["", "-journal", "-wal", "-shm"]) {
+      fs.rmSync(dbPath + suffix, { force: true });
+    }
+  });
+
+  const job = (uid: string, id: number, runId = `run-${uid}`) =>
+    queue.enqueue({ runId, type: "fade_lookup", payload: { uid, kind: "release", id } });
+  const statusOf = (jobId: number) =>
+    db.select().from(discogsQueueJobs).where(eq(discogsQueueJobs.id, jobId)).get()!.status;
+
+  it("records the collector a job belongs to", () => {
+    const jobId = job("alice", 1);
+
+    expect(db.select().from(discogsQueueJobs).where(eq(discogsQueueJobs.id, jobId)).get()!.uid).toBe("alice");
+  });
+
+  it("runs each collector's jobs on their own lane, one per pacing step", async () => {
+    const handler = vi.fn(async () => {});
+    queue.registerHandler("fade_lookup", handler);
+    job("alice", 1);
+    const alice2 = job("alice", 2);
+    job("bob", 3);
+
+    queue.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // alice's first and bob's first run together; alice's second waits for her pacing.
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(statusOf(alice2)).toBe("pending");
+
+    await vi.advanceTimersByTimeAsync(PACING_MS);
+    expect(handler).toHaveBeenCalledTimes(3);
+    expect(statusOf(alice2)).toBe("done");
+  });
+
+  it("keeps a collector's jobs PACING_MS apart even when a job arrives right after one finished", async () => {
+    const starts: number[] = [];
+    queue.registerHandler("fade_lookup", async () => {
+      starts.push(Date.now());
+    });
+    queue.start();
+    job("alice", 1);
+    await vi.advanceTimersByTimeAsync(0);
+    job("alice", 2);
+    await vi.advanceTimersByTimeAsync(PACING_MS);
+
+    expect(starts).toHaveLength(2);
+    expect(starts[1]! - starts[0]!).toBeGreaterThanOrEqual(PACING_MS);
+  });
+
+  it("pauses only the lane whose token Discogs is erroring on", async () => {
+    const handled: string[] = [];
+    queue.registerHandler("fade_lookup", async (payload) => {
+      handled.push(payload.uid);
+      if (payload.uid === "alice") throw new DiscogsTransientError("boom");
+    });
+    job("alice", 1);
+    queue.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(queue.getPause("alice")).not.toBeNull();
+    expect(queue.getPause("bob")).toBeNull();
+
+    const bob = job("bob", 2);
+    await vi.advanceTimersByTimeAsync(PACING_MS);
+
+    expect(statusOf(bob)).toBe("done");
+    expect(handled.filter((uid) => uid === "alice")).toHaveLength(1);
+  });
+
+  it("refuses an inline request only on the paused lane", async () => {
+    queue.registerHandler("fade_lookup", async () => {
+      throw new DiscogsTransientError("boom");
+    });
+    job("alice", 1);
+    queue.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(
+      queue.enqueueAndWait({ runId: "inline", type: "fade_lookup", payload: { uid: "alice", kind: "release", id: 9 } }),
+    ).rejects.toThrow(QueueUnavailableError);
+
+    queue.registerHandler("fade_lookup", async () => {});
+    const waiting = queue.enqueueAndWait({
+      runId: "inline",
+      type: "fade_lookup",
+      payload: { uid: "bob", kind: "release", id: 9 },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(waiting).resolves.toBeUndefined();
+  });
+
+  it("stops only the rejected collector's run when Discogs refuses their token", async () => {
+    queue.registerHandler("fade_lookup", async (payload) => {
+      if (payload.uid === "alice") throw new DiscogsAuthError("token rejected");
+    });
+    const aliceFirst = job("alice", 1, "alice-run");
+    const aliceSecond = job("alice", 2, "alice-run");
+    const bob = job("bob", 3);
+
+    queue.start();
+    await vi.advanceTimersByTimeAsync(PACING_MS * 2);
+
+    expect(statusOf(aliceFirst)).toBe("failed");
+    expect(statusOf(aliceSecond)).toBe("failed");
+    expect(statusOf(bob)).toBe("done");
+  });
+
+  it("gives up on one collector's work without failing everyone else's", async () => {
+    queue.registerHandler("fade_lookup", async (payload) => {
+      if (payload.uid === "alice") throw new DiscogsTransientError("down");
+    });
+    const alice = job("alice", 1);
+    queue.start();
+    for (let i = 0; i < 20 && statusOf(alice) !== "failed"; i++) {
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
+    }
+    expect(statusOf(alice)).toBe("failed");
+
+    const bob = job("bob", 2);
+    await vi.advanceTimersByTimeAsync(PACING_MS);
+
+    expect(statusOf(bob)).toBe("done");
   });
 });

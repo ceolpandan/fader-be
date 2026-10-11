@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { Router } from "express";
 import type { Db } from "../db/client";
+import { hasDiscogsToken } from "../db/discogs-tokens";
 import {
   fades,
   masterVersions,
@@ -274,7 +275,7 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
         continue;
       }
       if (row.lookupStatus !== "pending") return { ...current, lookupStatus: row.lookupStatus };
-      if (Date.now() >= deadline || deps.queue.getPause()) return { ...current, lookupStatus: "pending" };
+      if (Date.now() >= deadline || deps.queue.getPause(uid)) return { ...current, lookupStatus: "pending" };
       await sleep(LOOKUP_POLL_MS);
     }
   }
@@ -302,6 +303,12 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
     } else {
       const needsLookup =
         target.kind === "master" ? !hasStoredVersions(deps.db, target.id) : !target.resolved;
+      if (needsLookup && !hasDiscogsToken(deps.db, uid)) {
+        res
+          .status(409)
+          .json({ error: "Add a Discogs token in Settings to fade this release", code: "token_required" });
+        return;
+      }
       lookupStatus = needsLookup ? "pending" : "done";
 
       deps.db

@@ -34,11 +34,9 @@ function retryAfterMs(res: Response): number | null {
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
 }
 
-async function discogsGet<T>(path: string): Promise<T> {
-  const headers: Record<string, string> = { "User-Agent": USER_AGENT };
-  if (process.env.DISCOGS_TOKEN) {
-    headers.Authorization = `Discogs token=${process.env.DISCOGS_TOKEN}`;
-  }
+/** Every request is made with a collector's own personal access token; there is no server-wide one. */
+async function discogsGet<T>(path: string, token: string): Promise<T> {
+  const headers: Record<string, string> = { "User-Agent": USER_AGENT, Authorization: `Discogs token=${token}` };
 
   logger.request("DISCOGS", "GET", path);
   const start = Date.now();
@@ -74,28 +72,34 @@ async function discogsGet<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function getRelease(releaseId: number) {
-  return discogsGet<DiscogsRelease>(`/releases/${releaseId}`);
+/** Who a personal access token belongs to. Rejects with `DiscogsAuthError` when Discogs does not accept the token. */
+export function getIdentity(token: string) {
+  return discogsGet<{ id: number; username: string }>("/oauth/identity", token);
 }
 
-export function getMaster(masterId: number) {
-  return discogsGet<DiscogsMaster>(`/masters/${masterId}`);
+export function getRelease(releaseId: number, token: string) {
+  return discogsGet<DiscogsRelease>(`/releases/${releaseId}`, token);
 }
 
-function getMasterVersionsPage(masterId: number, page: number) {
+export function getMaster(masterId: number, token: string) {
+  return discogsGet<DiscogsMaster>(`/masters/${masterId}`, token);
+}
+
+function getMasterVersionsPage(masterId: number, page: number, token: string) {
   return discogsGet<DiscogsMasterVersionsResponse>(
     `/masters/${masterId}/versions?page=${page}&per_page=100`,
+    token,
   );
 }
 
 /** Walks every page of /masters/{id}/versions, returns all sibling release ids. */
-export async function getAllMasterVersionReleaseIds(masterId: number): Promise<number[]> {
+export async function getAllMasterVersionReleaseIds(masterId: number, token: string): Promise<number[]> {
   const ids: number[] = [];
   let page = 1;
   let totalPages = 1;
 
   do {
-    const res = await getMasterVersionsPage(masterId, page);
+    const res = await getMasterVersionsPage(masterId, page, token);
     ids.push(...res.versions.map((v) => v.id));
     totalPages = res.pagination.pages;
     page += 1;

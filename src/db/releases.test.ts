@@ -47,6 +47,10 @@ describe("releases table", () => {
     expect(result).toEqual({
       ...row,
       trackCount: 1,
+      ratingAverage: null,
+      ratingCount: null,
+      enrichedAt: null,
+      missingAt: null,
       artistSort: "The Persuader",
       formatSort: "Vinyl",
     });

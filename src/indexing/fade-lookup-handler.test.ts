@@ -36,7 +36,13 @@ describe("fade_lookup handler", () => {
   });
 
   const handler = () =>
-    createFadeLookupHandler({ db, enqueue, getRelease, getMasterVersionReleaseIds: getVersions });
+    createFadeLookupHandler({
+      db,
+      enqueue,
+      getToken: (uid) => (uid === "no-token" ? null : `token-${uid}`),
+      getRelease,
+      getMasterVersionReleaseIds: getVersions,
+    });
   const fade = (uid: string, kind: FadeKind, id: number) =>
     db.insert(fades).values({ uid, kind, id, createdAt: new Date(1000), lookupStatus: "pending" }).run();
   const fadeRows = () => db.select().from(fades).all();
@@ -123,6 +129,27 @@ describe("fade_lookup handler", () => {
 
     expect(getVersions).not.toHaveBeenCalled();
     expect(db.select().from(masterVersions).all()).toEqual([]);
+  });
+
+  it("calls Discogs with the fading collector's own token", async () => {
+    fade("u1", "release", 1);
+    getRelease.mockResolvedValue(release());
+    fade("u2", "master", 900);
+    getVersions.mockResolvedValue([1]);
+
+    await handler()({ uid: "u1", kind: "release", id: 1 }, ctx);
+    await handler()({ uid: "u2", kind: "master", id: 900 }, ctx);
+
+    expect(getRelease).toHaveBeenCalledWith(1, "token-u1");
+    expect(getVersions).toHaveBeenCalledWith(900, "token-u2");
+  });
+
+  it("fails permanently, without calling Discogs, when the collector has no token", async () => {
+    fade("no-token", "release", 1);
+
+    await expect(handler()({ uid: "no-token", kind: "release", id: 1 }, ctx)).rejects.toBeInstanceOf(NonRetryableError);
+
+    expect(getRelease).not.toHaveBeenCalled();
   });
 
   it("fails permanently when Discogs doesn't know the release or master", async () => {

@@ -8,8 +8,9 @@ import type { Db } from "./db/client";
 import { firebaseAuth } from "./middleware/firebase-auth";
 import { requestLogger } from "./middleware/request-logger";
 import type { DiscogsQueue } from "./queue/discogs-queue";
+import { createDiscogsTokenRouter } from "./routes/discogs-token";
 import { createFadeRouter } from "./routes/fade";
-import { mastersRouter } from "./routes/masters";
+import { createMastersRouter } from "./routes/masters";
 import { createReleasesRouter } from "./routes/releases";
 import { createSavedFiltersRouter } from "./routes/saved-filters";
 import { createSettingsRouter } from "./routes/settings";
@@ -23,6 +24,8 @@ export interface AppDeps {
   queue: DiscogsQueue;
   /** How long `POST /fade` waits for the fade's lookup before answering `pending`. */
   fadeLookupWaitMs?: number;
+  /** Asks Discogs who a token belongs to; defaults to the real API. */
+  getIdentity?: (token: string) => Promise<{ id: number; username: string }>;
 }
 
 export function createApp(deps: AppDeps): Express {
@@ -44,9 +47,10 @@ export function createApp(deps: AppDeps): Express {
   app.use(firebaseAuth);
 
   app.use("/releases", createReleasesRouter(deps));
-  app.use("/masters", mastersRouter);
+  app.use("/masters", createMastersRouter(deps));
   app.use("/fade", createFadeRouter(deps));
   app.use("/saved-filters", createSavedFiltersRouter(deps));
+  app.use("/settings/discogs-token", createDiscogsTokenRouter(deps));
   app.use("/settings", createSettingsRouter(deps));
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- express requires 4-arg error handlers

@@ -8,3 +8,7 @@ On a 429, 5xx or network failure the Discogs queue pauses and retries the same j
 - **Inline requests fail fast** with 503 "Discogs unavailable, retrying" while paused, instead of waiting and timing out with 504.
 - **The queue gives up after about 65 minutes of continuous failure** (1 + 2 + 4 + 8 minutes, then five retries at the 10-minute cap; `MAX_CAP_RETRIES`). It then fails all unfinished work, so each affected run ends in error. This is shorter than the roughly 8 hours the issue recommended, so an outage of an hour or more still ends the work in progress. Revisit if that bites.
 - **A 401/403 token refusal is not transient.** It fails that run at once with the Discogs message, with no retry.
+
+## Amended: one lane per collector token (fader-ui#109)
+
+There is no server-wide Discogs token any more; every request uses the collector's own personal access token. Discogs rate-limits each token separately, so the queue keeps **one lane per collector**: each lane paces its own jobs 1.1s apart and has its own pause and backoff (the steps, `Retry-After` and give-up rule above apply per lane). A transient error pauses only that collector's lane, and the give-up fails only their unfinished work. Inline requests fail fast only when their own lane is paused. A 401/403 fails that collector's run only. Jobs carry the collector in `discogs_queue_jobs.uid` (from `payload.uid`).

@@ -20,9 +20,12 @@ describe("getRelease", () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { id: 732194, title: "Stockholm" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await getRelease(732194);
+    const result = await getRelease(732194, "tok");
 
-    expect(fetchMock).toHaveBeenCalledWith("https://api.discogs.com/releases/732194", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.discogs.com/releases/732194",
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Discogs token=tok" }) }),
+    );
     expect(result.title).toBe("Stockholm");
   });
 
@@ -32,7 +35,7 @@ describe("getRelease", () => {
       vi.fn(async () => jsonResponse(404, {})),
     );
 
-    await expect(getRelease(1)).rejects.toThrow(DiscogsNotFoundError);
+    await expect(getRelease(1, "tok")).rejects.toThrow(DiscogsNotFoundError);
   });
 
   it("throws DiscogsAuthError on 403", async () => {
@@ -41,7 +44,7 @@ describe("getRelease", () => {
       vi.fn(async () => jsonResponse(403, { message: "You are not allowed to do this" })),
     );
 
-    await expect(getRelease(1)).rejects.toThrow(DiscogsAuthError);
+    await expect(getRelease(1, "tok")).rejects.toThrow(DiscogsAuthError);
   });
 
   it("throws DiscogsRateLimitError on 429", async () => {
@@ -50,6 +53,6 @@ describe("getRelease", () => {
       vi.fn(async () => jsonResponse(429, {}, { "Retry-After": "30" })),
     );
 
-    await expect(getRelease(1)).rejects.toThrow(DiscogsRateLimitError);
+    await expect(getRelease(1, "tok")).rejects.toThrow(DiscogsRateLimitError);
   });
 });

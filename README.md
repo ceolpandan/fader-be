@@ -33,14 +33,19 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 - `GET /releases` — paginated, filterable list of the stored releases (`?page=&pageSize=&sort=` and the filters)
 - `GET /releases/filter-options` — the genres, styles, formats and countries the filter dialog offers, most common first
 
+### Discogs token
+
+- `GET`, `PUT` and `DELETE /settings/discogs-token` — a collector's own Discogs personal access token, checked with Discogs on save and stored encrypted (write-only). Needs `TOKEN_ENCRYPTION_KEY` (see `.env.example`).
+
 ### Saved filters
 
 - `GET /saved-filters`, `POST /saved-filters` (409 when the collector already saved that query), `PATCH /saved-filters/:id` (rename) and `DELETE /saved-filters/:id`
 
-Set `DISCOGS_TOKEN` (personal access token from
-https://www.discogs.com/settings/developers) to raise Discogs' rate limit.
-Unauthenticated requests work but are limited to 25/min. `DB_PATH` controls where the
-SQLite database file lives (defaults to `./data/fader.sqlite`).
+There is no server-wide Discogs token: every Discogs request uses the signed-in collector's own
+personal access token (saved in Settings), through that collector's own queue lane, so each token
+has its own 1.1 s pacing and pause. A fade that needs a Discogs lookup is refused (409) until the
+collector has saved a token. `DB_PATH` controls where the SQLite database file lives (defaults to
+`./data/fader.sqlite`); a leftover `DISCOGS_TOKEN` in `.env` is ignored.
 
 ## Scripts
 

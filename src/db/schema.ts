@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, integer, text, primaryKey, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, real, text, primaryKey, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export interface ReleaseFormat {
   name: string;
@@ -34,7 +34,9 @@ export interface ReleaseVideo {
  * The Electronic catalogue, filled from the Discogs data dump by `npm run db:import`. The side
  * tables below are kept in step with `genres`, `styles` and `formats` by triggers (migration
  * `0021`), and `track_count`, `artist_sort` and `format_sort` are generated, so writing a row is
- * enough. Indexes serve the Explore sorts and filters (fader-ui#103, fader-ui#105).
+ * enough. Indexes serve the Explore sorts and filters (fader-ui#103, fader-ui#105). The rating,
+ * `enriched_at` and `missing_at` columns are only ever written by an enrichment run, and the
+ * dump import keeps existing rows as they are (`0007-catalogue-from-data-dump.md`).
  */
 export const releases = sqliteTable(
   "releases",
@@ -51,6 +53,13 @@ export const releases = sqliteTable(
     artists: text("artists", { mode: "json" }).$type<ReleaseArtistStub[]>().notNull(),
     tracklist: text("tracklist", { mode: "json" }).$type<ReleaseTrack[]>().notNull().default([]),
     videos: text("videos", { mode: "json" }).$type<ReleaseVideo[]>().notNull().default([]),
+    /** Discogs community rating, from an enrichment run (fader-ui#109); null until enriched. */
+    ratingAverage: real("rating_average"),
+    ratingCount: integer("rating_count"),
+    /** When an enrichment run last refreshed the row from the Discogs API. */
+    enrichedAt: integer("enriched_at", { mode: "timestamp" }),
+    /** When an enrichment run found Discogs no longer has the release; Explore hides it. */
+    missingAt: integer("missing_at", { mode: "timestamp" }),
     trackCount: integer("track_count").generatedAlwaysAs(sql`json_array_length(tracklist)`, { mode: "virtual" }),
     artistSort: text("artist_sort").generatedAlwaysAs(sql`json_extract(artists, '$[0].name')`, { mode: "virtual" }),
     formatSort: text("format_sort").generatedAlwaysAs(sql`json_extract(formats, '$[0].name')`, { mode: "virtual" }),
@@ -64,6 +73,8 @@ export const releases = sqliteTable(
     // Serves the track-count sort, which puts releases with no tracks last.
     index("releases_track_count_idx").on(sql`(${table.trackCount} = 0)`, sql`${table.trackCount} DESC`, table.id),
     index("releases_country_idx").on(table.country, table.id),
+    // Serves the rating sort, which puts releases that were never enriched last.
+    index("releases_rating_idx").on(sql`(${table.ratingAverage} IS NULL)`, sql`${table.ratingAverage} DESC`, table.id),
   ],
 );
 
@@ -128,6 +139,8 @@ export interface QueueJobPayloadMap {
 
 export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  /** The collector whose Discogs token the job uses; each collector has their own lane (`payload.uid`). */
+  uid: text("uid").notNull().default(""),
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
@@ -169,6 +182,17 @@ export const savedFilters = sqliteTable(
   },
   (table) => [uniqueIndex("saved_filters_uid_query_idx").on(table.uid, table.query)],
 );
+
+/**
+ * A collector's Discogs personal access token, encrypted (`util/token-crypto.ts`). Write-only:
+ * no endpoint returns it. `username` is who Discogs said it belongs to when it was saved.
+ */
+export const discogsTokens = sqliteTable("discogs_tokens", {
+  uid: text("uid").primaryKey(),
+  tokenEncrypted: text("token_encrypted").notNull(),
+  username: text("username").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
 
 /** What a user faded: a master (hides every version under it) or a release without a master. */
 export const fades = sqliteTable(
