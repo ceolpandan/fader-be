@@ -1,4 +1,4 @@
-import type { ReleaseArtistStub, ReleaseTrack } from "../db/schema";
+import type { ReleaseArtistStub, ReleaseLabel, ReleaseTrack } from "../db/schema";
 
 /** A video of a release; `uri` is the dump's `src`. */
 export interface ReleaseVideoDto {
@@ -16,6 +16,7 @@ export interface ReleaseDetailDto {
   genres?: string[];
   styles?: string[];
   artists: ReleaseArtistStub[];
+  labels: ReleaseLabel[];
   tracklist: ReleaseTrack[];
   videos: ReleaseVideoDto[];
 }

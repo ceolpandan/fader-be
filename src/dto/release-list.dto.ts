@@ -1,4 +1,4 @@
-import type { ReleaseArtistStub, ReleaseFormat } from "../db/schema";
+import type { ReleaseArtistStub, ReleaseFormat, ReleaseLabel } from "../db/schema";
 
 /** The values the filter dialog offers for each category, most common first. */
 export interface ReleaseFilterOptionsDto {
@@ -21,6 +21,7 @@ export interface ReleaseListItemDto {
   ratingAverage: number | null;
   ratingCount: number | null;
   artists: ReleaseArtistStub[];
+  labels: ReleaseLabel[];
 }
 
 export interface ReleaseListPageDto {

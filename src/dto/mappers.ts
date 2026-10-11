@@ -12,6 +12,7 @@ export function mapReleaseRowToDto(row: typeof releases.$inferSelect): ReleaseDe
     genres: row.genres,
     styles: row.styles,
     artists: row.artists,
+    labels: row.labels,
     tracklist: row.tracklist,
     videos: row.videos.map(({ src, ...rest }) => ({ uri: src, ...rest })),
   };

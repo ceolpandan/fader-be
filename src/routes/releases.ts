@@ -84,6 +84,7 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
         ratingAverage: releases.ratingAverage,
         ratingCount: releases.ratingCount,
         artists: releases.artists,
+        labels: releases.labels,
       })
       .from(releases)
       .where(and(isNotMissing, isNotFadedFor(uid), ...filters))

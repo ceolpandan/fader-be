@@ -837,7 +837,7 @@ components:
     ReleaseListItemDto:
       type: object
       required:
-        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, artists]
+        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, artists, labels]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -862,6 +862,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReleaseArtistDto"
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseLabelDto"
+
+    ReleaseLabelDto:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        catno: { type: string }
 
     ReleaseListPageDto:
       type: object
@@ -1308,7 +1320,7 @@ components:
       type: object
       description: >
         Served from our own database.
-      required: [id, title, year, country, artists, tracklist, videos]
+      required: [id, title, year, country, artists, labels, tracklist, videos]
       properties:
         id: { type: integer }
         title: { type: string }
@@ -1324,6 +1336,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReleaseArtistStub"
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseLabelDto"
         tracklist:
           type: array
           items:

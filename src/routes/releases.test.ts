@@ -30,6 +30,7 @@ const expectedDto = {
   genres: ["Electronic"],
   styles: ["Tech House", "Electro"],
   artists: [{ id: 1, name: "The Persuader" }],
+  labels: [{ id: 5, name: "Svek" }],
   tracklist: [{ position: "A1", title: "Track One", duration: "5:00" }],
   videos: [{ uri: "https://youtube.com/x", title: "Track One (video)" }],
 };

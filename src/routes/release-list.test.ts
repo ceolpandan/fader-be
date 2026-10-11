@@ -110,6 +110,7 @@ describe("GET /releases and /releases/filter-options", () => {
           ratingAverage: null,
           ratingCount: null,
           artists: [{ id: 7, name: "Band" }],
+          labels: [],
         },
       ]);
     });
