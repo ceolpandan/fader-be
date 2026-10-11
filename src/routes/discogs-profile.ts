@@ -3,14 +3,15 @@ import { Router } from "express";
 import type { Db } from "../db/client";
 import { getDiscogsToken } from "../db/discogs-tokens";
 import { discogsProfiles } from "../db/schema";
-import { DiscogsAuthError, DiscogsTransientError, getDiscogsProfile, type DiscogsProfile } from "../discogs-client";
+import { DiscogsAuthError } from "../discogs-client";
 import type { DiscogsProfileDto } from "../dto/discogs-profile.dto";
+import type { DiscogsQueue } from "../queue/discogs-queue";
+import { NonRetryableError, QueueUnavailableError, QueueWaitTimeoutError } from "../queue/discogs-queue";
 import { logger } from "../util/logger";
 
 export interface DiscogsProfileRouterDeps {
   db: Db;
-  /** Fetches the token owner's profile from Discogs; defaults to the real API. */
-  getDiscogsProfile?: (token: string) => Promise<DiscogsProfile>;
+  queue: DiscogsQueue;
 }
 
 function cached(db: Db, uid: string): DiscogsProfileDto {
@@ -30,11 +31,12 @@ function cached(db: Db, uid: string): DiscogsProfileDto {
 
 /**
  * The collector's Discogs profile for the home page: the cached copy, and a refresh that fetches
- * it again with their saved token. Nothing is fetched until the collector asks.
+ * it again with their saved token. The refresh goes through the Discogs queue like every other
+ * request, ahead of any enrichment run, so it stays within the rate limit. Nothing is fetched
+ * until the collector asks.
  */
 export function createDiscogsProfileRouter(deps: DiscogsProfileRouterDeps): Router {
   const router = Router();
-  const fetchProfile = deps.getDiscogsProfile ?? getDiscogsProfile;
 
   router.get("/", (req, res) => {
     res.set("Cache-Control", "no-store").json(cached(deps.db, req.user!.uid));
@@ -42,34 +44,33 @@ export function createDiscogsProfileRouter(deps: DiscogsProfileRouterDeps): Rout
 
   router.post("/refresh", async (req, res) => {
     const uid = req.user!.uid;
-    const token = getDiscogsToken(deps.db, uid);
-    if (!token) {
+    if (!getDiscogsToken(deps.db, uid)) {
       res.status(409).json({ error: "Save a Discogs token in Settings first" });
       return;
     }
 
-    let profile: DiscogsProfile;
     try {
-      profile = await fetchProfile(token);
+      await deps.queue.enqueueAndWait({
+        runId: `discogs-profile:${uid}`,
+        type: "discogs_profile",
+        payload: { uid },
+      });
     } catch (err) {
       // 400, not 401: the UI treats a 401 from this API as a lost sign-in.
       if (err instanceof DiscogsAuthError) {
         res.status(400).json({ error: "Discogs did not accept your token. Update it in Settings." });
-      } else if (err instanceof DiscogsTransientError) {
-        res.status(502).json({ error: "Couldn't reach Discogs. Try again in a moment." });
+      } else if (err instanceof NonRetryableError) {
+        res.status(409).json({ error: "Save a Discogs token in Settings first" });
+      } else if (err instanceof QueueUnavailableError) {
+        res.status(503).json({ error: "Discogs is unavailable right now. Try again in a moment." });
+      } else if (err instanceof QueueWaitTimeoutError) {
+        res.status(504).json({ error: "Discogs is busy. Your profile will update once it catches up." });
       } else {
         logger.error("Discogs profile fetch failed", err);
         res.status(502).json({ error: "Couldn't fetch your Discogs profile. Try again." });
       }
       return;
     }
-
-    const values = { ...profile, fetchedAt: new Date() };
-    deps.db
-      .insert(discogsProfiles)
-      .values({ uid, ...values })
-      .onConflictDoUpdate({ target: discogsProfiles.uid, set: values })
-      .run();
     res.set("Cache-Control", "no-store").json(cached(deps.db, uid));
   });
 

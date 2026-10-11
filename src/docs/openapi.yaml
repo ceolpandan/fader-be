@@ -549,8 +549,10 @@ paths:
       operationId: refreshDiscogsProfile
       summary: Fetch the signed-in user's Discogs profile again
       description: >
-        Asks Discogs with the user's saved token and replaces the cached
-        profile. A failed refresh leaves the cached profile as it was.
+        Queues the fetch like every other Discogs request, ahead of any
+        enrichment run, and waits for it. It asks Discogs with the user's saved
+        token and replaces the cached profile. A failed refresh leaves the
+        cached profile as it was.
       responses:
         "200":
           description: The profile as just fetched
@@ -571,7 +573,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
         "502":
-          description: Discogs could not be reached or failed
+          description: Discogs failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is erroring and the queue is waiting it out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "504":
+          description: >
+            The queue did not get to the fetch in time; it still runs, and the
+            cached profile updates once it has
           content:
             application/json:
               schema:

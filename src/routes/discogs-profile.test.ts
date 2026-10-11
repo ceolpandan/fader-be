@@ -8,7 +8,9 @@ import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
 import { discogsProfiles } from "../db/schema";
-import { DiscogsAuthError, DiscogsTransientError, type DiscogsProfile } from "../discogs-client";
+import { DiscogsAuthError, DiscogsTransientError } from "../discogs-client";
+import { getDiscogsToken } from "../db/discogs-tokens";
+import { createDiscogsProfileHandler } from "../indexing/discogs-profile-handler";
 import { DiscogsQueue } from "../queue/discogs-queue";
 import { createApp } from "../app";
 
@@ -41,20 +43,28 @@ describe("discogs profile", () => {
   let db: Db;
   let queue: DiscogsQueue;
   let app: Express;
-  let getDiscogsProfile: Mock<(token: string) => Promise<DiscogsProfile>>;
+  let getCollectionCount: Mock<(username: string, token: string) => Promise<number>>;
+  let getWantlistCount: Mock<(username: string, token: string) => Promise<number>>;
 
   beforeEach(() => {
     dbPath = path.join(os.tmpdir(), `fader-test-${Date.now()}-${Math.random()}.sqlite`);
     db = createDb(dbPath);
     migrate(db, { migrationsFolder: "./drizzle" });
     queue = new DiscogsQueue(db);
-    getDiscogsProfile = vi.fn(async () => ({ username: "dan", collectionCount: 120, wantlistCount: 7 }));
-    app = createApp({
-      db,
-      queue,
-      getIdentity: async () => ({ id: 1, username: "dan" }),
-      getDiscogsProfile,
-    });
+    getCollectionCount = vi.fn(async () => 120);
+    getWantlistCount = vi.fn(async () => 7);
+    queue.registerHandler(
+      "discogs_profile",
+      createDiscogsProfileHandler({
+        db,
+        getToken: (uid) => getDiscogsToken(db, uid),
+        getCollectionCount,
+        getWantlistCount,
+        sleep: async () => {},
+      }),
+    );
+    queue.start();
+    app = createApp({ db, queue, getIdentity: async () => ({ id: 1, username: "dan" }) });
 
     process.env.FIREBASE_PROJECT_ID = "test-project";
     process.env.FIREBASE_CLIENT_EMAIL = "test@test-project.iam.gserviceaccount.com";
@@ -95,7 +105,7 @@ describe("discogs profile", () => {
       const res = await asUser(app, "u1").get("/me/discogs-profile");
 
       expect(res.body).toEqual({ tokenSet: true, profile: null });
-      expect(getDiscogsProfile).not.toHaveBeenCalled();
+      expect(getCollectionCount).not.toHaveBeenCalled();
     });
   });
 
@@ -106,7 +116,8 @@ describe("discogs profile", () => {
       const res = await asUser(app, "u1").post("/me/discogs-profile/refresh");
 
       expect(res.status).toBe(200);
-      expect(getDiscogsProfile).toHaveBeenCalledWith("abc123");
+      expect(getCollectionCount).toHaveBeenCalledWith("dan", "abc123");
+      expect(getWantlistCount).toHaveBeenCalledWith("dan", "abc123");
       expect(res.body).toMatchObject({
         tokenSet: true,
         profile: { username: "dan", collectionCount: 120, wantlistCount: 7 },
@@ -121,7 +132,8 @@ describe("discogs profile", () => {
     it("replaces the cached profile on a second refresh", async () => {
       await saveToken("u1");
       await asUser(app, "u1").post("/me/discogs-profile/refresh");
-      getDiscogsProfile.mockResolvedValue({ username: "dan", collectionCount: 121, wantlistCount: 6 });
+      getCollectionCount.mockResolvedValue(121);
+      getWantlistCount.mockResolvedValue(6);
 
       const res = await asUser(app, "u1").post("/me/discogs-profile/refresh");
 
@@ -133,13 +145,13 @@ describe("discogs profile", () => {
       const res = await asUser(app, "u1").post("/me/discogs-profile/refresh");
 
       expect(res.status).toBe(409);
-      expect(getDiscogsProfile).not.toHaveBeenCalled();
+      expect(getCollectionCount).not.toHaveBeenCalled();
     });
 
     it("answers 400, not 401, when Discogs rejects the token, and keeps the cached profile", async () => {
       await saveToken("u1");
       await asUser(app, "u1").post("/me/discogs-profile/refresh");
-      getDiscogsProfile.mockRejectedValue(new DiscogsAuthError("revoked"));
+      getCollectionCount.mockRejectedValue(new DiscogsAuthError("revoked"));
 
       const res = await asUser(app, "u1").post("/me/discogs-profile/refresh");
 
@@ -148,13 +160,13 @@ describe("discogs profile", () => {
       expect(read.body.profile).toMatchObject({ collectionCount: 120 });
     });
 
-    it("answers 502 when Discogs fails, and caches nothing", async () => {
+    it("answers 503 when Discogs is erroring, and caches nothing", async () => {
       await saveToken("u1");
-      getDiscogsProfile.mockRejectedValue(new DiscogsTransientError("down"));
+      getCollectionCount.mockRejectedValue(new DiscogsTransientError("down"));
 
       const res = await asUser(app, "u1").post("/me/discogs-profile/refresh");
 
-      expect(res.status).toBe(502);
+      expect(res.status).toBe(503);
       expect(db.select().from(discogsProfiles).all()).toEqual([]);
     });
 
@@ -166,6 +178,28 @@ describe("discogs profile", () => {
 
       expect(res.body).toEqual({ tokenSet: false, profile: null });
     });
+  });
+
+  it("goes through the queue, ahead of enrichment jobs that are waiting", async () => {
+    const order: string[] = [];
+    queue.registerHandler("release_detail", async ({ releaseId }) => {
+      order.push(`release ${releaseId}`);
+    });
+    getCollectionCount.mockImplementation(async () => {
+      order.push("profile");
+      return 120;
+    });
+    await saveToken("u1");
+    for (const releaseId of [1, 2, 3]) {
+      queue.enqueue({ runId: "run1", type: "release_detail", payload: { uid: "u1", releaseId } });
+    }
+    // The first release is processed; the lane then paces the rest.
+    await vi.waitFor(() => expect(order).toEqual(["release 1"]));
+
+    const res = await asUser(app, "u1").post("/me/discogs-profile/refresh");
+
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["release 1", "profile"]);
   });
 
   describe("when the token changes", () => {

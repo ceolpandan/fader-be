@@ -123,7 +123,7 @@ export const filterOptions = sqliteTable(
   (table) => [primaryKey({ columns: [table.kind, table.value] })],
 );
 
-export type QueueJobType = "fade_lookup" | "release_detail";
+export type QueueJobType = "fade_lookup" | "release_detail" | "discogs_profile";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
 /** Resolves a fade against Discogs: a release fade finds its master, a master fade fetches its versions. */
@@ -141,9 +141,15 @@ export interface ReleaseDetailPayload {
   once?: boolean;
 }
 
+/** Fetches the collector's own Discogs profile for the home page: their collection and wantlist counts. */
+export interface DiscogsProfilePayload {
+  uid: string;
+}
+
 export interface QueueJobPayloadMap {
   fade_lookup: FadeLookupPayload;
   release_detail: ReleaseDetailPayload;
+  discogs_profile: DiscogsProfilePayload;
 }
 
 export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
@@ -153,7 +159,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
-    .$type<FadeLookupPayload | ReleaseDetailPayload>()
+    .$type<FadeLookupPayload | ReleaseDetailPayload | DiscogsProfilePayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
   priority: integer("priority").notNull().default(0),
