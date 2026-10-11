@@ -528,6 +528,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /me/discogs-profile:
+    get:
+      operationId: getDiscogsProfile
+      summary: The signed-in user's cached Discogs profile
+      description: >
+        What the last refresh fetched from Discogs with the user's saved token:
+        username, collection and wantlist counts. Nothing is fetched here;
+        `profile` is null until the first refresh and whenever there is no
+        token.
+      responses:
+        "200":
+          description: The cached profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscogsProfileDto"
+  /me/discogs-profile/refresh:
+    post:
+      operationId: refreshDiscogsProfile
+      summary: Fetch the signed-in user's Discogs profile again
+      description: >
+        Asks Discogs with the user's saved token and replaces the cached
+        profile. A failed refresh leaves the cached profile as it was.
+      responses:
+        "200":
+          description: The profile as just fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscogsProfileDto"
+        "400":
+          description: Discogs did not accept the saved token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: The user has no Discogs token saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Discogs could not be reached or failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /settings/discogs-token:
     get:
       operationId: getDiscogsToken
@@ -994,6 +1042,32 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/EnrichmentRunDto"
+
+    DiscogsProfileDataDto:
+      type: object
+      required: [username, collectionCount, wantlistCount, fetchedAt]
+      properties:
+        username: { type: string }
+        collectionCount:
+          type: integer
+          description: Copies in the collection; a release owned twice counts twice.
+        wantlistCount: { type: integer }
+        fetchedAt:
+          type: string
+          format: date-time
+
+    DiscogsProfileDto:
+      type: object
+      required: [tokenSet, profile]
+      properties:
+        tokenSet:
+          type: boolean
+          description: Whether the user has saved a Discogs token.
+        profile:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/DiscogsProfileDataDto"
+          description: Null until the first fetch, and whenever there is no token.
 
     DiscogsTokenDto:
       type: object

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Router } from "express";
 import type { Db } from "../db/client";
-import { discogsTokens } from "../db/schema";
+import { discogsProfiles, discogsTokens } from "../db/schema";
 import { DiscogsAuthError, DiscogsTransientError, getIdentity } from "../discogs-client";
 import type { DiscogsTokenDto } from "../dto/discogs-token.dto";
 import { encryptToken, tokenKeyAvailable } from "../util/token-crypto";
@@ -65,6 +65,8 @@ export function createDiscogsTokenRouter(deps: DiscogsTokenRouterDeps): Router {
     }
 
     const uid = req.user!.uid;
+    // The cached profile belongs to the token it was fetched with.
+    deps.db.delete(discogsProfiles).where(eq(discogsProfiles.uid, uid)).run();
     const values = { tokenEncrypted: encryptToken(token), username, createdAt: new Date() };
     deps.db
       .insert(discogsTokens)
@@ -77,6 +79,7 @@ export function createDiscogsTokenRouter(deps: DiscogsTokenRouterDeps): Router {
   });
 
   router.delete("/", (req, res) => {
+    deps.db.delete(discogsProfiles).where(eq(discogsProfiles.uid, req.user!.uid)).run();
     deps.db.delete(discogsTokens).where(eq(discogsTokens.uid, req.user!.uid)).run();
     res.status(204).end();
   });

@@ -77,6 +77,40 @@ export function getIdentity(token: string) {
   return discogsGet<{ id: number; username: string }>("/oauth/identity", token);
 }
 
+/** What a collector's Discogs profile card shows. */
+export interface DiscogsProfile {
+  username: string;
+  collectionCount: number;
+  wantlistCount: number;
+}
+
+/** The copies in the collector's collection (Discogs' "All" folder, id 0), duplicates counted. */
+async function getCollectionCount(username: string, token: string): Promise<number> {
+  const folder = await discogsGet<{ count: number }>(
+    `/users/${encodeURIComponent(username)}/collection/folders/0`,
+    token,
+  );
+  return folder.count;
+}
+
+async function getWantlistCount(username: string, token: string): Promise<number> {
+  const wants = await discogsGet<{ pagination: { items: number } }>(
+    `/users/${encodeURIComponent(username)}/wants?per_page=1`,
+    token,
+  );
+  return wants.pagination.items;
+}
+
+/** The token owner's username and how many records they have in their collection and wantlist. */
+export async function getDiscogsProfile(token: string): Promise<DiscogsProfile> {
+  const { username } = await getIdentity(token);
+  const [collectionCount, wantlistCount] = await Promise.all([
+    getCollectionCount(username, token),
+    getWantlistCount(username, token),
+  ]);
+  return { username, collectionCount, wantlistCount };
+}
+
 export function getRelease(releaseId: number, token: string) {
   return discogsGet<DiscogsRelease>(`/releases/${releaseId}`, token);
 }

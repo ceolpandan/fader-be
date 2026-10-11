@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getRelease, DiscogsAuthError, DiscogsNotFoundError, DiscogsRateLimitError } from "./discogs-client";
+import { getDiscogsProfile, getRelease, DiscogsAuthError, DiscogsNotFoundError, DiscogsRateLimitError } from "./discogs-client";
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
   return {
@@ -54,5 +54,40 @@ describe("getRelease", () => {
     );
 
     await expect(getRelease(1, "tok")).rejects.toThrow(DiscogsRateLimitError);
+  });
+});
+
+describe("getDiscogsProfile", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the username, then the collection and wantlist counts", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/oauth/identity")) return jsonResponse(200, { id: 1, username: "dan dan" });
+      if (url.includes("/collection/folders/0")) return jsonResponse(200, { id: 0, count: 120 });
+      return jsonResponse(200, { pagination: { items: 7 }, wants: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const profile = await getDiscogsProfile("tok");
+
+    expect(profile).toEqual({ username: "dan dan", collectionCount: 120, wantlistCount: 7 });
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls).toContain("https://api.discogs.com/users/dan%20dan/collection/folders/0");
+    expect(urls).toContain("https://api.discogs.com/users/dan%20dan/wants?per_page=1");
+  });
+
+  it("fails as a whole when one of the counts fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url.endsWith("/oauth/identity")
+          ? jsonResponse(200, { id: 1, username: "dan" })
+          : jsonResponse(403, {}),
+      ),
+    );
+
+    await expect(getDiscogsProfile("tok")).rejects.toThrow(DiscogsAuthError);
   });
 });

@@ -203,6 +203,18 @@ export const discogsTokens = sqliteTable("discogs_tokens", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * What the collector's Discogs profile looked like when last fetched, for the home page. One row
+ * per user, written only when every value was fetched, and dropped with the token it came from.
+ */
+export const discogsProfiles = sqliteTable("discogs_profiles", {
+  uid: text("uid").primaryKey(),
+  username: text("username").notNull(),
+  collectionCount: integer("collection_count").notNull(),
+  wantlistCount: integer("wantlist_count").notNull(),
+  fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
+});
+
 /** What a user faded: a master (hides every version under it) or a release without a master. */
 export const fades = sqliteTable(
   "fades",
