@@ -1,5 +1,6 @@
 import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import type { Request } from "express";
+import { isEnriched } from "../db/enriched";
 import { releaseFormats, releaseGenres, releaseStyles, releases } from "../db/schema";
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks"] as const;
@@ -73,6 +74,26 @@ function parseStyleCombinations(value: unknown): string[][] {
     combinations.push(styles);
   }
   return combinations;
+}
+
+const MAX_SEARCH_LENGTH = 200;
+
+/** A LIKE pattern matching `term` anywhere, with the wildcard characters taken literally. */
+function containsPattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
+/**
+ * Every word of the search is in the title or in one of the artist names (SQLite's LIKE
+ * ignores ASCII case).
+ */
+function searchFilter(text: string): SQL {
+  const words = text.split(/\s+/).filter((word) => word.length > 0);
+  const each = words.map((word) => {
+    const pattern = containsPattern(word);
+    return sql`(${releases.title} LIKE ${pattern} ESCAPE '\\' OR EXISTS (SELECT 1 FROM json_each(${releases.artists}) WHERE json_extract(value, '$.name') LIKE ${pattern} ESCAPE '\\'))`;
+  });
+  return sql`(${sql.join(each, sql` AND `)})`;
 }
 
 const TRACK_COUNT_OPTIONS = ["1", "2", "3", "4", "5", "6", "7+"];
@@ -163,7 +184,14 @@ export function parseReleaseQuery(req: Pick<Request, "query">): { query: Release
     return { error: "noLinks must be one of only, exclude" };
   }
 
+  const enriched = req.query.enriched;
+  if (enriched !== undefined && enriched !== "only") return { error: "enriched must be only" };
+  const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (search.length > MAX_SEARCH_LENGTH) return { error: `q must be at most ${MAX_SEARCH_LENGTH} characters` };
+
   const filters: SQL[] = [];
+  if (search.length > 0) filters.push(searchFilter(search));
+  if (enriched === "only") filters.push(isEnriched);
   if (genre.length > 0) filters.push(hasAny("genre", genre));
   if (style.length > 0) filters.push(hasAny("style", style));
   if (format.length > 0) filters.push(hasAny("format", format));

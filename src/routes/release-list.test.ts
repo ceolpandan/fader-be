@@ -65,6 +65,8 @@ describe("GET /releases and /releases/filter-options", () => {
       .run();
   }
 
+  const markEnriched = (...ids: number[]) =>
+    db.update(releases).set({ enrichedAt: new Date() }).where(inArray(releases.id, ids)).run();
   const titles = (body: { items: { title: string }[] }) => body.items.map((item) => item.title);
   const format = (name: string) => [{ name, descriptions: [] }];
 
@@ -139,6 +141,44 @@ describe("GET /releases and /releases/filter-options", () => {
       const filtered = await get("/releases?genre=Jazz");
       expect(filtered.body.total).toBe(2);
       expect(filtered.body.enrichedCount).toBeUndefined();
+    });
+
+    it("searches the title and the artist names: every word must match, in any case", async () => {
+      seedRelease(1, "Selected Ambient Works", { artists: [{ id: 1, name: "Aphex Twin" }] });
+      seedRelease(2, "Drukqs", { artists: [{ id: 1, name: "Aphex Twin" }] });
+      seedRelease(3, "Twin Peaks", { artists: [{ id: 2, name: "Angelo Badalamenti" }] });
+      seedRelease(4, "Name", { artists: [{ id: 3, name: "Someone" }] });
+
+      expect(titles((await get("/releases?q=aphex")).body)).toEqual(["Drukqs", "Selected Ambient Works"]);
+      expect(titles((await get("/releases?q=twin ambient")).body)).toEqual(["Selected Ambient Works"]);
+      expect(titles((await get("/releases?q=TWIN")).body)).toEqual(["Drukqs", "Selected Ambient Works", "Twin Peaks"]);
+      // The JSON keys of the stored artists are not searchable.
+      expect(titles((await get("/releases?q=id")).body)).toEqual([]);
+      expect(titles((await get("/releases?q=50%25")).body)).toEqual([]);
+      expect(titles((await get("/releases?q=%20")).body)).toHaveLength(4);
+      expect((await get(`/releases?q=${"a".repeat(201)}`)).status).toBe(400);
+    });
+
+    it("keeps only enriched releases with enriched=only, and counts them whatever the other filters", async () => {
+      seedRelease(1, "Rock enriched", { genres: ["Rock"] });
+      seedRelease(2, "Jazz enriched", { genres: ["Jazz"] });
+      seedRelease(3, "Rock never", { genres: ["Rock"] });
+      seedRelease(4, "Faded enriched");
+      seedRelease(5, "Missing enriched");
+      markEnriched(1, 2, 4, 5);
+      db.insert(fades).values({ uid: "test-uid", kind: "release", id: 4, createdAt: new Date() }).run();
+      db.update(releases).set({ missingAt: new Date() }).where(eq(releases.id, 5)).run();
+
+      const all = await get("/releases?enriched=only");
+      expect(titles(all.body)).toEqual(["Jazz enriched", "Rock enriched"]);
+      expect(all.body.enrichedCount).toBe(2);
+
+      const rock = await get("/releases?enriched=only&genre=Rock&q=enriched");
+      expect(titles(rock.body)).toEqual(["Rock enriched"]);
+      expect(rock.body).toMatchObject({ total: 1, enrichedCount: 2 });
+
+      expect((await get("/releases")).body.enrichedCount).toBeUndefined();
+      expect((await get("/releases?enriched=all")).status).toBe(400);
     });
 
     it("sorts, with the descending prefix", async () => {
@@ -323,6 +363,30 @@ describe("GET /releases and /releases/filter-options", () => {
     it("returns empty arrays when there are no options", async () => {
       const res = await get("/releases/filter-options");
       expect(res.body).toEqual({ genres: [], styles: [], formats: [], countries: [] });
+    });
+
+    it("with enriched=only, lists only what the enriched releases have, most common first", async () => {
+      seedRelease(1, "R1", { country: "UK", genres: ["Rock"], styles: ["Prog Rock"], formats: format("Vinyl") });
+      seedRelease(2, "R2", { country: "US", genres: ["Rock", "Pop"], styles: ["Indie Rock"], formats: format("CD") });
+      seedRelease(3, "R3", { country: "US", genres: ["Pop"], styles: ["Synth-pop"], formats: format("CD") });
+      seedRelease(4, "Never", { country: "FR", genres: ["Jazz"], styles: ["Bop"], formats: format("Cassette") });
+      seedRelease(5, "Gone", { country: "DE", genres: ["Folk"], styles: ["Celtic"], formats: format("LP") });
+      markEnriched(1, 2, 3, 5);
+      db.update(releases).set({ missingAt: new Date() }).where(eq(releases.id, 5)).run();
+      rebuildFilterOptions(db.$client);
+
+      const res = await get("/releases/filter-options?enriched=only");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        genres: ["Pop", "Rock"],
+        styles: ["Indie Rock", "Prog Rock", "Synth-pop"],
+        formats: ["CD", "Vinyl"],
+        countries: ["US", "UK"],
+      });
+    });
+
+    it("rejects an unknown enriched value", async () => {
+      expect((await get("/releases/filter-options?enriched=all")).status).toBe(400);
     });
 
   });
