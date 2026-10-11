@@ -99,14 +99,6 @@ paths:
             Search text, at most 200 characters. Every word must be in the title
             or in one of the artist names, in any case.
           schema: { type: string, maxLength: 200 }
-        - name: enriched
-          in: query
-          description: >
-            only keeps releases an enrichment run has fetched, and adds
-            enrichedCount to the response.
-          schema:
-            type: string
-            enum: [only]
         - name: sort
           in: query
           schema:
@@ -133,9 +125,7 @@ paths:
       summary: >
         The genres, styles, format names and countries the filter dialog offers,
         each list most common first. Built when the catalogue is imported, so it
-        does not follow filters, fades or enrichment and carries no counts. The
-        Enriched page offers the same lists as Explore; an enriched parameter
-        sent by an older client is ignored.
+        does not follow filters, fades or enrichment and carries no counts.
       responses:
         "200":
           description: Filter options
@@ -907,11 +897,6 @@ components:
         fadedCount:
           type: integer
           description: How many releases the user has faded. Ignores filters.
-        enrichedCount:
-          type: integer
-          description: >
-            Only with enriched=only: every enriched release the user can see,
-            whatever the other filters.
 
     ReleaseFilterOptionsDto:
       type: object
