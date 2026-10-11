@@ -27,8 +27,12 @@ The paced lanes every Discogs request goes through, one per collector (each toke
 _Avoid_: Job runner
 
 **Pause**:
-When Discogs errors (429, 5xx, network failure) the collector's lane stops and retries the same job after 1, 2, 4, 8, then 10 minutes, or after Discogs' `Retry-After` when longer. A pause costs the job no attempts. After about an hour of continuous failure the queue gives up and every unfinished run ends in error.
+When Discogs errors (429 or a network failure; a 5xx too, once it keeps happening) the collector's lane stops and retries the same job after 1, 2, 4, 8, then 10 minutes, or after Discogs' `Retry-After` when longer. A pause costs the job no attempts. After about an hour of continuous failure the queue gives up and every unfinished run ends in error.
 _Avoid_: Rate-limit wait, throttle
+
+**Set aside**:
+A job whose release Discogs answers with a 5xx is retried at the queue's normal pace, without a pause, up to 3 tries in all; then it is marked failed (its job row keeps the error, counted as `failed` on the run) and the lane moves on. If 5 jobs in a row are set aside with no success between, it is an outage rather than bad releases: they go back to pending and the lane pauses.
+_Avoid_: Dead letter, skip
 
 **Inline request**:
 Work a person is actively waiting on, such as a fade's lookup. It goes ahead of background work in the Discogs queue.

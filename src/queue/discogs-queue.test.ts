@@ -6,8 +6,9 @@ import os from "node:os";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { createDb, type Db } from "../db/client";
 import { discogsQueueJobs } from "../db/schema";
-import { DiscogsAuthError, DiscogsRateLimitError, DiscogsTransientError } from "../discogs-client";
+import { DiscogsAuthError, DiscogsRateLimitError, DiscogsServerError, DiscogsTransientError } from "../discogs-client";
 import {
+  DEAD_LETTER_OUTAGE_THRESHOLD,
   DiscogsQueue,
   MAX_CAP_RETRIES,
   NonRetryableError,
@@ -497,6 +498,68 @@ describe("DiscogsQueue", () => {
       expect(status(id).status).toBe("pending");
     });
 
+
+  describe("Discogs server errors (5xx)", () => {
+    const status = (id: number) =>
+      db.select().from(discogsQueueJobs).where(eq(discogsQueueJobs.id, id)).all()[0]!;
+    const enqueue = (releaseId: number) =>
+      queue.enqueue({ runId: "r", type: "release_detail", payload: { uid: "u", releaseId } });
+
+    it("retries a job at the lane's pace without pausing, and sets it aside after 3 tries", async () => {
+      const calls: number[] = [];
+      queue.registerHandler("release_detail", async ({ releaseId }) => {
+        calls.push(releaseId);
+        if (releaseId === 1) throw new DiscogsServerError("Discogs API error 500 for /releases/1");
+      });
+      const bad = enqueue(1);
+      const good = enqueue(2);
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toEqual([1]);
+      expect(queue.getPause("u")).toBeNull();
+      expect(status(bad).status).toBe("pending");
+
+      await vi.advanceTimersByTimeAsync(PACING_MS);
+      await vi.advanceTimersByTimeAsync(PACING_MS);
+      expect(calls).toEqual([1, 1, 1]);
+      expect(status(bad)).toMatchObject({ status: "failed", attempts: 3 });
+      expect(status(bad).errorMessage).toContain("500");
+
+      await vi.advanceTimersByTimeAsync(PACING_MS);
+      expect(calls).toEqual([1, 1, 1, 2]);
+      expect(status(good).status).toBe("done");
+      expect(queue.getPause("u")).toBeNull();
+    });
+
+    it("treats a run of set-aside jobs as an outage: it takes them back and pauses the lane", async () => {
+      queue.registerHandler("release_detail", async () => {
+        throw new DiscogsServerError("Discogs API error 500");
+      });
+      const ids = Array.from({ length: DEAD_LETTER_OUTAGE_THRESHOLD + 1 }, (_, i) => enqueue(i + 1));
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(PACING_MS * (DEAD_LETTER_OUTAGE_THRESHOLD * 3));
+
+      expect(queue.getPause("u")).not.toBeNull();
+      expect(ids.map((id) => status(id).status)).toEqual(ids.map(() => "pending"));
+    });
+
+    it("forgets earlier set-aside jobs once a job succeeds", async () => {
+      queue.registerHandler("release_detail", async ({ releaseId }) => {
+        if (releaseId % 2 === 1) throw new DiscogsServerError("500");
+      });
+      for (let i = 1; i <= DEAD_LETTER_OUTAGE_THRESHOLD * 2; i++) enqueue(i);
+
+      queue.start();
+      await vi.advanceTimersByTimeAsync(PACING_MS * 60);
+
+      expect(queue.getPause("u")).toBeNull();
+      expect(db.select().from(discogsQueueJobs).where(eq(discogsQueueJobs.status, "failed")).all()).toHaveLength(
+        DEAD_LETTER_OUTAGE_THRESHOLD,
+      );
+    });
+  });
 
   });
 });

@@ -23,6 +23,12 @@ export class DiscogsTransientError extends Error {
   }
 }
 
+/**
+ * Discogs answered 5xx. It may be an outage or just this one release; the queue retries the job
+ * a few times at its normal pace, then sets it aside, and pauses only when it keeps happening.
+ */
+export class DiscogsServerError extends DiscogsTransientError {}
+
 /** Discogs answered 429. */
 export class DiscogsRateLimitError extends DiscogsTransientError {}
 
@@ -63,7 +69,7 @@ async function discogsGet<T>(path: string, token: string): Promise<T> {
     );
   }
   if (res.status >= 500) {
-    throw new DiscogsTransientError(`Discogs API error ${res.status} for ${path}`);
+    throw new DiscogsServerError(`Discogs API error ${res.status} for ${path}`);
   }
   if (!res.ok) {
     throw new Error(`Discogs API error ${res.status} for ${path}: ${await res.text()}`);

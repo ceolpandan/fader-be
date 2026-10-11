@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { discogsQueueJobs, type QueueJobPayloadMap, type QueueJobType } from "../db/schema";
-import { DiscogsAuthError, DiscogsTransientError } from "../discogs-client";
+import { DiscogsAuthError, DiscogsServerError, DiscogsTransientError } from "../discogs-client";
 import { logger, highlightId } from "../util/logger";
 
 export const PACING_MS = 1100;
@@ -15,6 +15,11 @@ export const PAUSE_BASE_MS = 60_000;
 export const PAUSE_CAP_MS = 10 * 60_000;
 /** Retries at the cap (with no success in between) before the queue gives up on Discogs. */
 export const MAX_CAP_RETRIES = 5;
+/**
+ * Jobs set aside in a row after Discogs answered 5xx on all their tries, with no success between.
+ * That many is an outage rather than bad releases, so the lane pauses and takes them back.
+ */
+export const DEAD_LETTER_OUTAGE_THRESHOLD = 5;
 export class NonRetryableError extends Error {}
 
 /** `enqueueAndWait` gave up waiting; the job itself is still queued and will run. */
@@ -71,6 +76,8 @@ interface Lane {
   pause: { retryAt: number; backoffMs: number } | null;
   consecutiveFailures: number;
   capRetries: number;
+  /** Jobs set aside after exhausting their tries on a 5xx, since the last success. */
+  deadLettered: number[];
 }
 
 export class DiscogsQueue {
@@ -105,7 +112,7 @@ export class DiscogsQueue {
   private lane(uid: string): Lane {
     let lane = this.lanes.get(uid);
     if (!lane) {
-      lane = { timer: null, running: false, nextAllowedAt: 0, pause: null, consecutiveFailures: 0, capRetries: 0 };
+      lane = { timer: null, running: false, nextAllowedAt: 0, pause: null, consecutiveFailures: 0, capRetries: 0, deadLettered: [] };
       this.lanes.set(uid, lane);
     }
     return lane;
@@ -351,6 +358,47 @@ if (this.started && this.hasPending(uid)) this.scheduleTick(uid, lane, PACING_MS
     lane.pause = null;
     lane.consecutiveFailures = 0;
     lane.capRetries = 0;
+    lane.deadLettered = [];
+  }
+
+  /**
+   * Discogs answered 5xx. The job is tried again at the lane's normal pace, with no pause; once it
+   * has used its MAX_ATTEMPTS it is set aside as failed (its row keeps the error, like a dead-letter
+   * queue) and the lane moves on. If DEAD_LETTER_OUTAGE_THRESHOLD jobs in a row are set aside it is
+   * an outage, not bad releases: they go back to pending and the lane pauses.
+   */
+  private handleServerError(job: QueueJobRow, err: DiscogsServerError): void {
+    const attempts = job.attempts + 1;
+
+    if (attempts < MAX_ATTEMPTS) {
+      this.db
+        .update(discogsQueueJobs)
+        .set({ status: "pending", attempts, errorMessage: err.message, updatedAt: new Date() })
+        .where(eq(discogsQueueJobs.id, job.id))
+        .run();
+      logger.warn(`Job ${highlightId(job.id)} got a server error (attempt ${attempts}/${MAX_ATTEMPTS}), retrying: ${err.message}`);
+      return;
+    }
+
+    const lane = this.lane(job.uid);
+    if (lane.deadLettered.length + 1 >= DEAD_LETTER_OUTAGE_THRESHOLD) {
+      const revived = lane.deadLettered;
+      lane.deadLettered = [];
+      if (revived.length > 0) {
+        this.db
+          .update(discogsQueueJobs)
+          .set({ status: "pending", attempts: 0, updatedAt: new Date() })
+          .where(inArray(discogsQueueJobs.id, revived))
+          .run();
+      }
+      logger.warn(`${DEAD_LETTER_OUTAGE_THRESHOLD} jobs in a row got server errors, treating it as an outage`);
+      this.pauseAndRetry({ ...job, attempts: 0 }, err);
+      return;
+    }
+
+    lane.deadLettered.push(job.id);
+    logger.warn(`Job ${highlightId(job.id)} set aside after ${attempts} server errors, moving on: ${err.message}`);
+    this.markFailed(job, err.message, attempts, err);
   }
 
   /**
@@ -443,6 +491,10 @@ if (this.started && this.hasPending(uid)) this.scheduleTick(uid, lane, PACING_MS
   private handleFailure(job: QueueJobRow, err: unknown): void {
     const errorMessage = err instanceof Error ? err.message : String(err);
 
+    if (err instanceof DiscogsServerError) {
+      this.handleServerError(job, err);
+      return;
+    }
     if (err instanceof DiscogsTransientError) {
       this.pauseAndRetry(job, err);
       return;
