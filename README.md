@@ -37,6 +37,16 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 
 - `GET`, `PUT` and `DELETE /settings/discogs-token` — a collector's own Discogs personal access token, checked with Discogs on save and stored encrypted (write-only). Needs `TOKEN_ENCRYPTION_KEY` (see `.env.example`).
 
+### Enrichment
+
+- `GET /enrichment/preview?query=&fresh=` — how many releases a run of an Explore query would fetch, and the cap
+- `POST /enrichment/run` — start a run (`{ query, fresh }`); 409 `token_required` or `run_active`, 422 `too_many_releases`
+- `GET /enrichment/run` — the active run, or the last one, with counts, the pause and the not-found releases
+- `POST /enrichment/run/cancel` — drop the queued fetches of the active run
+- `POST /releases/:id/refresh` — fetch one release now
+
+See `docs/adr/0008-enrichment-runs.md`. `ENRICH_MAX_RELEASES` caps one run (see `.env.example`).
+
 ### Saved filters
 
 - `GET /saved-filters`, `POST /saved-filters` (409 when the collector already saved that query), `PATCH /saved-filters/:id` (rename) and `DELETE /saved-filters/:id`

@@ -1,5 +1,7 @@
 # Releases are no longer enriched from the Discogs API
 
+**Superseded by `0008-enrichment-runs.md` (fader-ui#109):** enrichment is back, run by a collector with their own token. This record shows what the first removal dropped.
+
 Fader used to fetch each release the first time a collector opened it (and on Refresh), storing its cover, community rating, haves and wants. That is gone from `main` (fader-ui#100):
 
 - **Removed:** the `release_detail` queue job and handler, `POST /releases/{id}/refresh`, the live fetch on `GET /releases/{id}` (now 404 when the release is not stored), the rating sort, and the `thumb`, `rating_average`, `rating_count`, `haves` and `wants` columns (migration `0018`, which also deletes queued `release_detail` jobs).

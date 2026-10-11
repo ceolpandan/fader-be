@@ -23,16 +23,30 @@ _Avoid_: Audio link, media link
 ## Discogs access
 
 **Discogs queue**:
-The single paced lane every Discogs request goes through, so we stay under Discogs' rate limit.
+The paced lanes every Discogs request goes through, one per collector (each token has its own rate limit), so we stay under Discogs' rate limit.
 _Avoid_: Job runner
 
 **Pause**:
-When Discogs errors (429, 5xx, network failure) the whole Discogs queue stops and retries the same job after 1, 2, 4, 8, then 10 minutes, or after Discogs' `Retry-After` when longer. A pause costs the job no attempts. After about an hour of continuous failure the queue gives up and every unfinished run ends in error.
+When Discogs errors (429, 5xx, network failure) the collector's lane stops and retries the same job after 1, 2, 4, 8, then 10 minutes, or after Discogs' `Retry-After` when longer. A pause costs the job no attempts. After about an hour of continuous failure the queue gives up and every unfinished run ends in error.
 _Avoid_: Rate-limit wait, throttle
 
 **Inline request**:
 Work a person is actively waiting on, such as a fade's lookup. It goes ahead of background work in the Discogs queue.
 _Avoid_: Priority job, foreground job
+
+## Enrichment
+
+**Enrichment run**:
+A collector's fetch from the Discogs API, with their own token, of the releases a saved filter shows, to store each one's community rating and refresh its details. One active run per collector; only the latest is kept. Skips faded releases and, unless fresh, releases already enriched. See `docs/adr/0008-enrichment-runs.md`.
+_Avoid_: Scan, indexing, sync
+
+**Fresh enrichment**:
+An enrichment run that also re-fetches releases enriched before and overwrites them (and releases marked missing).
+_Avoid_: Re-index, force
+
+**Missing release**:
+A release an enrichment run found Discogs no longer has (a 404 after retries). It is marked `missing_at` and Explore hides it; a fresh enrichment clears the mark if Discogs finds it again.
+_Avoid_: Deleted release, dead release
 
 ## Hiding
 
