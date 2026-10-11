@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createDb, type Db } from "../db/client";
 import { rebuildFilterOptions } from "../db/filter-options";
 import { fades, releases } from "../db/schema";
@@ -107,6 +107,8 @@ describe("GET /releases and /releases/filter-options", () => {
           genres: ["Rock"],
           styles: [],
           formats: [],
+          ratingAverage: null,
+          ratingCount: null,
           artists: [{ id: 7, name: "Band" }],
         },
       ]);
@@ -138,7 +140,7 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(filtered.body.enrichedCount).toBeUndefined();
     });
 
-    it("sorts, with the descending prefix, and rejects the retired rating sort", async () => {
+    it("sorts, with the descending prefix", async () => {
       seedRelease(1, "B", { year: 1990 });
       seedRelease(2, "A", { year: 2000 });
       seedRelease(3, "C", { year: 1980 });
@@ -146,7 +148,20 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(titles((await get("/releases")).body)).toEqual(["A", "B", "C"]);
       expect(titles((await get("/releases?sort=-title")).body)).toEqual(["C", "B", "A"]);
       expect(titles((await get("/releases?sort=year")).body)).toEqual(["C", "B", "A"]);
-      expect((await get("/releases?sort=rating")).status).toBe(400);
+      expect((await get("/releases?sort=nonsense")).status).toBe(400);
+    });
+
+    it("sorts by rating, with releases that were never enriched last either way", async () => {
+      seedRelease(1, "Low");
+      seedRelease(2, "Never");
+      seedRelease(3, "High");
+      db.update(releases).set({ ratingAverage: 2.5, ratingCount: 10 }).where(eq(releases.id, 1)).run();
+      db.update(releases).set({ ratingAverage: 4.5, ratingCount: 99 }).where(eq(releases.id, 3)).run();
+
+      expect(titles((await get("/releases?sort=-rating")).body)).toEqual(["High", "Low", "Never"]);
+      expect(titles((await get("/releases?sort=rating")).body)).toEqual(["Low", "High", "Never"]);
+      const first = (await get("/releases?sort=-rating")).body.items[0];
+      expect(first).toMatchObject({ ratingAverage: 4.5, ratingCount: 99 });
     });
 
     it("sorts by track count, with releases that have no tracklist last", async () => {

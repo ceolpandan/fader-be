@@ -102,11 +102,12 @@ describe("releases routes", () => {
     expect(res.body).toEqual({ error: "id must be an integer" });
   });
 
-  it("has no refresh route", async () => {
+  it("refuses to refresh without a Discogs token", async () => {
     const res = await request(app)
       .post("/releases/732194/refresh")
       .set("Authorization", "Bearer test-token");
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("token_required");
   });
 });

@@ -15,7 +15,9 @@ paths:
       description: >
         Pages, filters and sorts the stored releases; 400 on invalid input.
         Releases the user has faded (directly or through their master) are
-        left out of items and total.
+        left out of items and total, and so are releases an enrichment run
+        found Discogs no longer has. Sorting by rating puts releases that were
+        never enriched last in either direction.
       parameters:
         - name: page
           in: query
@@ -96,7 +98,7 @@ paths:
           schema:
             type: string
             enum:
-              [title, -title, year, -year, artist, -artist, format, -format, tracks, -tracks]
+              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks]
             default: title
       responses:
         "200":
@@ -151,6 +153,171 @@ paths:
                 $ref: "#/components/schemas/ErrorDto"
         "404":
           description: Release not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /releases/{id}/refresh:
+    post:
+      operationId: refreshRelease
+      summary: Fetch one release from Discogs now and return it
+      description: >
+        Fetches the release with the signed-in user's own Discogs token, ahead
+        of any queued enrichment run, and overwrites what is stored for it,
+        rating included. A release Discogs no longer has is marked missing
+        (Explore hides it) and answers 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The refreshed release
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseDetailDto"
+        "400":
+          description: Invalid id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Discogs does not have the release
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: >
+            The user has no Discogs token, or Discogs rejected it (code
+            token_required).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Discogs fetch failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is erroring and the user's queue is paused; try again shortly
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "504":
+          description: Timed out waiting for the Discogs fetch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /enrichment/preview:
+    get:
+      operationId: previewEnrichmentRun
+      summary: What an enrichment run would do for a filter
+      description: >
+        Counts the releases the filter shows the user that a run would fetch
+        from Discogs, and those it would leave alone (faded ones, and, unless
+        fresh, already enriched or missing ones; releases another run has
+        queued). max is the most releases one run may fetch.
+      parameters:
+        - name: query
+          in: query
+          description: The Explore query string, without page.
+          schema: { type: string }
+        - name: fresh
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: The counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnrichmentPreviewDto"
+        "400":
+          description: Invalid query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /enrichment/run:
+    get:
+      operationId: getEnrichmentRun
+      summary: The user's active enrichment run, or their last one
+      description: >
+        Only the latest run is kept. run is null before the user ever started
+        one. Poll it for progress.
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnrichmentStatusDto"
+    post:
+      operationId: startEnrichmentRun
+      summary: Fetch the releases a filter shows from Discogs, for their rating
+      description: >
+        Queues one fetch per release the filter shows the user that is not
+        faded, not already enriched (unless fresh) and not already queued by
+        another run, at one request per 1.1 seconds on the user's own token.
+        Replaces the user's last finished run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartEnrichmentRunRequestDto"
+      responses:
+        "201":
+          description: The run was started (or finished at once when nothing needed fetching)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnrichmentRunDto"
+        "400":
+          description: Invalid query or body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: >
+            The user has no Discogs token (code token_required), or already has
+            an active run (code run_active). Nothing is queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "422":
+          description: >
+            More releases to fetch than the server allows in one run (code
+            too_many_releases). Nothing is queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /enrichment/run/cancel:
+    post:
+      operationId: cancelEnrichmentRun
+      summary: Stop the active enrichment run
+      description: Drops the fetches not started yet; the one in flight finishes.
+      responses:
+        "200":
+          description: The cancelled run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnrichmentRunDto"
+        "409":
+          description: No run is active (code no_active_run)
           content:
             application/json:
               schema:
@@ -606,7 +773,7 @@ components:
     ReleaseListItemDto:
       type: object
       required:
-        [releaseId, title, year, country, genres, styles, formats, artists]
+        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, artists]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -622,6 +789,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReleaseFormatDto"
+        ratingAverage:
+          type: number
+          nullable: true
+          description: Discogs community rating; null until an enrichment run has fetched the release.
+        ratingCount: { type: integer, nullable: true }
         artists:
           type: array
           items:
@@ -735,6 +907,93 @@ components:
           type: string
           maxLength: 200
           description: Trimmed; must not be empty.
+
+    EnrichmentPreviewDto:
+      type: object
+      required: [count, skipped, max]
+      properties:
+        count:
+          type: integer
+          description: Releases the run would fetch from Discogs.
+        skipped:
+          type: integer
+          description: Releases matching the filter that the run leaves alone.
+        max:
+          type: integer
+          nullable: true
+          description: The most releases one run may fetch; null when there is no limit.
+
+    StartEnrichmentRunRequestDto:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: The Explore query string, without page.
+        fresh:
+          type: boolean
+          description: Fetch releases that were already enriched again.
+
+    EnrichmentNotFoundDto:
+      type: object
+      required: [releaseId, title, artists]
+      properties:
+        releaseId: { type: integer }
+        title: { type: string }
+        artists:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseArtistDto"
+
+    EnrichmentRunDto:
+      type: object
+      required:
+        [id, status, query, fresh, total, skipped, enriched, notFound, failed, remaining, startedAt, finishedAt, errorMessage, pausedUntil, notFoundReleases]
+      properties:
+        id: { type: string }
+        status:
+          type: string
+          enum: [running, done, cancelled, failed]
+        query: { type: string }
+        fresh: { type: boolean }
+        total:
+          type: integer
+          description: Releases queued for the run.
+        skipped:
+          type: integer
+          description: Matching releases left alone - already enriched, or queued by another run.
+        enriched: { type: integer }
+        notFound:
+          type: integer
+          description: Releases Discogs no longer has; Explore hides them.
+        failed: { type: integer }
+        remaining:
+          type: integer
+          description: Fetches not finished yet.
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+        errorMessage:
+          type: string
+          nullable: true
+          description: Why a failed run stopped.
+        pausedUntil:
+          type: string
+          format: date-time
+          nullable: true
+          description: While Discogs is erroring, when the run tries again.
+        notFoundReleases:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnrichmentNotFoundDto"
+
+    EnrichmentStatusDto:
+      type: object
+      required: [run]
+      properties:
+        run:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/EnrichmentRunDto"
 
     DiscogsTokenDto:
       type: object

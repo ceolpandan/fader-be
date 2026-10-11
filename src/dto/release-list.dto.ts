@@ -17,6 +17,9 @@ export interface ReleaseListItemDto {
   genres: string[];
   styles: string[];
   formats: ReleaseFormat[];
+  /** Discogs community rating; null until an enrichment run has fetched the release. */
+  ratingAverage: number | null;
+  ratingCount: number | null;
   artists: ReleaseArtistStub[];
 }
 

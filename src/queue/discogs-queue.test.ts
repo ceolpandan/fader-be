@@ -477,8 +477,8 @@ describe("DiscogsQueue", () => {
       expect(status(first).status).toBe("failed");
       expect(status(sameRun).status).toBe("failed");
       expect(status(otherRun).status).toBe("failed");
-      expect(aborted).toHaveBeenCalledWith("a");
-      expect(aborted).toHaveBeenCalledWith("b");
+      expect(aborted).toHaveBeenCalledWith("a", expect.any(Error));
+      expect(aborted).toHaveBeenCalledWith("b", expect.any(Error));
       expect(queue.getPause("u")).toBeNull();
     });
 

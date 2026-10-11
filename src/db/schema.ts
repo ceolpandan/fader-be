@@ -123,7 +123,7 @@ export const filterOptions = sqliteTable(
   (table) => [primaryKey({ columns: [table.kind, table.value] })],
 );
 
-export type QueueJobType = "fade_lookup";
+export type QueueJobType = "fade_lookup" | "release_detail";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
 /** Resolves a fade against Discogs: a release fade finds its master, a master fade fetches its versions. */
@@ -133,8 +133,17 @@ export interface FadeLookupPayload {
   id: number;
 }
 
+/** Fetches one release from Discogs for its rating (enrichment, fader-ui#109). */
+export interface ReleaseDetailPayload {
+  uid: string;
+  releaseId: number;
+  /** An inline refresh: a Discogs 404 marks the release missing at once instead of after retries. */
+  once?: boolean;
+}
+
 export interface QueueJobPayloadMap {
   fade_lookup: FadeLookupPayload;
+  release_detail: ReleaseDetailPayload;
 }
 
 export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
@@ -144,7 +153,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
-    .$type<FadeLookupPayload>()
+    .$type<FadeLookupPayload | ReleaseDetailPayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
   priority: integer("priority").notNull().default(0),
@@ -227,4 +236,33 @@ export const masterVersions = sqliteTable(
     primaryKey({ columns: [table.masterId, table.releaseId] }),
     index("master_versions_release_idx").on(table.releaseId),
   ],
+);
+
+export type EnrichmentRunStatus = "running" | "done" | "cancelled" | "failed";
+
+/**
+ * A collector's enrichment run (fader-ui#109): the releases an Explore filter shows, fetched from
+ * Discogs for their rating. The run id is the queue `run_id` of its jobs, whose states give the
+ * progress. Only the latest run per collector is kept. `total` is the jobs queued, `skipped` the
+ * matching releases left alone (already enriched, or already queued by another run).
+ */
+export const enrichmentRuns = sqliteTable("enrichment_runs", {
+  id: text("id").primaryKey(),
+  uid: text("uid").notNull(),
+  /** The Explore query the run was started from, without `page`. */
+  query: text("query").notNull(),
+  fresh: integer("fresh", { mode: "boolean" }).notNull(),
+  status: text("status").$type<EnrichmentRunStatus>().notNull(),
+  total: integer("total").notNull(),
+  skipped: integer("skipped").notNull(),
+  errorMessage: text("error_message"),
+  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp" }),
+});
+
+/** The releases a run found Discogs no longer has. */
+export const enrichmentNotFound = sqliteTable(
+  "enrichment_not_found",
+  { runId: text("run_id").notNull(), releaseId: integer("release_id").notNull() },
+  (table) => [primaryKey({ columns: [table.runId, table.releaseId] })],
 );

@@ -9,6 +9,7 @@ import { firebaseAuth } from "./middleware/firebase-auth";
 import { requestLogger } from "./middleware/request-logger";
 import type { DiscogsQueue } from "./queue/discogs-queue";
 import { createDiscogsTokenRouter } from "./routes/discogs-token";
+import { createEnrichmentRouter } from "./routes/enrichment";
 import { createFadeRouter } from "./routes/fade";
 import { createMastersRouter } from "./routes/masters";
 import { createReleasesRouter } from "./routes/releases";
@@ -48,6 +49,7 @@ export function createApp(deps: AppDeps): Express {
 
   app.use("/releases", createReleasesRouter(deps));
   app.use("/masters", createMastersRouter(deps));
+  app.use("/enrichment", createEnrichmentRouter(deps));
   app.use("/fade", createFadeRouter(deps));
   app.use("/saved-filters", createSavedFiltersRouter(deps));
   app.use("/settings/discogs-token", createDiscogsTokenRouter(deps));

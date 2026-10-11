@@ -2,7 +2,7 @@ import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import type { Request } from "express";
 import { releaseFormats, releaseGenres, releaseStyles, releases } from "../db/schema";
 
-const SORT_FIELDS = ["title", "year", "artist", "format", "tracks"] as const;
+const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
 const SORT_OPTIONS = SORT_FIELDS.flatMap((field) => [field, `-${field}`]) as string[];
 
@@ -97,6 +97,8 @@ function sortColumn(field: SortField) {
       return releases.artistSort;
     case "format":
       return releases.formatSort;
+    case "rating":
+      return releases.ratingAverage;
     case "tracks":
       return releases.trackCount;
   }
@@ -124,7 +126,7 @@ function parseOptionalInt(value: unknown, name: string): { value?: number; error
 }
 
 /** Reads `page`, `pageSize`, the filters and `sort` from the query string; `error` is the 400 message. */
-export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { error: string } {
+export function parseReleaseQuery(req: Pick<Request, "query">): { query: ReleaseQuery } | { error: string } {
   const page = Number(req.query.page ?? 1);
   const pageSize = Number(req.query.pageSize ?? 50);
   if (!Number.isInteger(page) || page < 1) return { error: "page must be a positive integer" };
@@ -183,8 +185,13 @@ export function parseReleaseQuery(req: Request): { query: ReleaseQuery } | { err
   const styleCombinations = combinations.length > 0 ? styleCombinationsFilter(combinations) : null;
 
   const orderExpr = sortColumn(sortField);
-  // A release with no tracklist has no known track count, so it goes last.
-  const nullsLast = sortField === "tracks" ? [sql`${releases.trackCount} = 0`] : [];
+  // Releases never enriched have no rating, and one with no tracklist has no known track count: both go last.
+  const nullsLast =
+    sortField === "rating"
+      ? [sql`${releases.ratingAverage} IS NULL`]
+      : sortField === "tracks"
+        ? [sql`${releases.trackCount} = 0`]
+        : [];
   const orderBy = [...nullsLast, isDescending ? desc(orderExpr) : asc(orderExpr), sql`${releases.id}`];
 
   return { query: { page, pageSize, filters, styleCombinations, orderBy } };

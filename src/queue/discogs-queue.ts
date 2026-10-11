@@ -82,7 +82,7 @@ export class DiscogsQueue {
     { uid: string; resolve: () => void; reject: (cause: unknown) => void }
   >();
   private readonly inFlight = new Map<string, Promise<void>>();
-  private readonly abortedListeners: ((runId: string) => void)[] = [];
+  private readonly abortedListeners: ((runId: string, cause: unknown) => void)[] = [];
   private readonly lanes = new Map<string, Lane>();
   private started = false;
 
@@ -98,7 +98,7 @@ export class DiscogsQueue {
   }
 
   /** Notified once for each run cut short (Discogs gave up, or refused our token), after its jobs are failed. */
-  onRunAborted(listener: (runId: string) => void): void {
+  onRunAborted(listener: (runId: string, cause: unknown) => void): void {
     this.abortedListeners.push(listener);
   }
 
@@ -182,6 +182,19 @@ export class DiscogsQueue {
         },
       );
     });
+  }
+
+  /** Drops the run's jobs that have not started; returns how many. The one being processed finishes. */
+  cancelRun(runId: string): number {
+    const pending = and(eq(discogsQueueJobs.runId, runId), eq(discogsQueueJobs.status, "pending"));
+    const ids = this.db.select({ id: discogsQueueJobs.id }).from(discogsQueueJobs).where(pending).all();
+    this.db.delete(discogsQueueJobs).where(pending).run();
+    for (const { id } of ids) {
+      this.backoffUntil.delete(id);
+      this.waiters.get(id)?.reject(new Error("Run cancelled"));
+      this.waiters.delete(id);
+    }
+    return ids.length;
   }
 
   recoverStuckJobs(): void {
@@ -423,7 +436,7 @@ if (this.started && this.hasPending(uid)) this.scheduleTick(uid, lane, PACING_MS
 
     this.markFailed(job, errorMessage, job.attempts, cause);
     for (const runId of runIds) {
-      for (const listener of this.abortedListeners) listener(runId);
+      for (const listener of this.abortedListeners) listener(runId, cause);
     }
   }
 
