@@ -4,8 +4,9 @@ import path from "node:path";
 import { createApp } from "./app";
 import { createDb } from "./db/client";
 import { getDiscogsToken } from "./db/discogs-tokens";
-import { getAllMasterVersionReleaseIds, getRelease } from "./discogs-client";
+import { getAllMasterVersionReleaseIds, getCollectionCount, getRelease, getWantlistCount } from "./discogs-client";
 import { failRun, finishRunsWithNothingLeft, finishRunWhenSettled } from "./enrichment/enrichment-run";
+import { createDiscogsProfileHandler } from "./indexing/discogs-profile-handler";
 import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
@@ -39,6 +40,15 @@ queue.registerHandler(
 queue.registerHandler(
   "release_detail",
   createReleaseDetailHandler({ db, getToken: (uid) => getDiscogsToken(db, uid), getRelease }),
+);
+queue.registerHandler(
+  "discogs_profile",
+  createDiscogsProfileHandler({
+    db,
+    getToken: (uid) => getDiscogsToken(db, uid),
+    getCollectionCount,
+    getWantlistCount,
+  }),
 );
 queue.onSettled((job) => markFadeLookupFailed(db, job));
 queue.onSettled((job) => finishRunWhenSettled(db, job));

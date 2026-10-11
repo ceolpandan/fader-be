@@ -7,7 +7,6 @@ import swaggerUi from "swagger-ui-express";
 import type { Db } from "./db/client";
 import { firebaseAuth } from "./middleware/firebase-auth";
 import { requestLogger } from "./middleware/request-logger";
-import type { DiscogsProfile } from "./discogs-client";
 import type { DiscogsQueue } from "./queue/discogs-queue";
 import { createDiscogsProfileRouter } from "./routes/discogs-profile";
 import { createDiscogsTokenRouter } from "./routes/discogs-token";
@@ -29,8 +28,6 @@ export interface AppDeps {
   fadeLookupWaitMs?: number;
   /** Asks Discogs who a token belongs to; defaults to the real API. */
   getIdentity?: (token: string) => Promise<{ id: number; username: string }>;
-  /** Fetches a collector's Discogs profile for the home page; defaults to the real API. */
-  getDiscogsProfile?: (token: string) => Promise<DiscogsProfile>;
 }
 
 export function createApp(deps: AppDeps): Express {
