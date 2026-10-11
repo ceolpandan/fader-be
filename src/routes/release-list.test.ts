@@ -365,28 +365,17 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(res.body).toEqual({ genres: [], styles: [], formats: [], countries: [] });
     });
 
-    it("with enriched=only, lists only what the enriched releases have, most common first", async () => {
+    it("serves the same lists with enriched=only, whatever is enriched", async () => {
       seedRelease(1, "R1", { country: "UK", genres: ["Rock"], styles: ["Prog Rock"], formats: format("Vinyl") });
-      seedRelease(2, "R2", { country: "US", genres: ["Rock", "Pop"], styles: ["Indie Rock"], formats: format("CD") });
-      seedRelease(3, "R3", { country: "US", genres: ["Pop"], styles: ["Synth-pop"], formats: format("CD") });
-      seedRelease(4, "Never", { country: "FR", genres: ["Jazz"], styles: ["Bop"], formats: format("Cassette") });
-      seedRelease(5, "Gone", { country: "DE", genres: ["Folk"], styles: ["Celtic"], formats: format("LP") });
-      markEnriched(1, 2, 3, 5);
-      db.update(releases).set({ missingAt: new Date() }).where(eq(releases.id, 5)).run();
+      seedRelease(2, "Never", { country: "FR", genres: ["Jazz"], styles: ["Bop"], formats: format("Cassette") });
+      markEnriched(1);
       rebuildFilterOptions(db.$client);
 
-      const res = await get("/releases/filter-options?enriched=only");
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual({
-        genres: ["Pop", "Rock"],
-        styles: ["Indie Rock", "Prog Rock", "Synth-pop"],
-        formats: ["CD", "Vinyl"],
-        countries: ["US", "UK"],
-      });
-    });
-
-    it("rejects an unknown enriched value", async () => {
-      expect((await get("/releases/filter-options?enriched=all")).status).toBe(400);
+      const all = await get("/releases/filter-options");
+      const enriched = await get("/releases/filter-options?enriched=only");
+      expect(enriched.status).toBe(200);
+      expect(enriched.body).toEqual(all.body);
+      expect(enriched.body.genres).toEqual(expect.arrayContaining(["Rock", "Jazz"]));
     });
 
   });

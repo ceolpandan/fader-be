@@ -46,34 +46,8 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       .where(and(...where))
       .all()[0]!.count;
 
-  /** The same lists as `filter_options`, counted over the enriched releases only. */
-  function enrichedFilterOptions(): ReleaseFilterOptionsDto {
-    const scope = sql`${isEnriched} AND ${isNotMissing}`;
-    const valuesOf = (query: SQL) => deps.db.all<{ value: string }>(query).map((row) => row.value);
-    const fromSideTable = (table: string, column: string) =>
-      valuesOf(
-        sql`SELECT ${sql.raw(`s.${column}`)} AS value FROM ${sql.raw(table)} s JOIN releases ON releases.id = s.release_id
-            WHERE ${scope} GROUP BY value ORDER BY count(*) DESC, value`,
-      );
-    return {
-      genres: fromSideTable("release_genres", "genre"),
-      styles: fromSideTable("release_styles", "style"),
-      formats: fromSideTable("release_formats", "format"),
-      countries: valuesOf(
-        sql`SELECT country AS value FROM releases WHERE country IS NOT NULL AND ${scope} GROUP BY country ORDER BY count(*) DESC, country`,
-      ),
-    };
-  }
-
-  router.get("/filter-options", (req, res) => {
-    if (req.query.enriched !== undefined) {
-      if (req.query.enriched !== "only") {
-        res.status(400).json({ error: "enriched must be only" });
-        return;
-      }
-      res.json(enrichedFilterOptions());
-      return;
-    }
+  /** The one static list per catalogue, filled by the importer. An `enriched` parameter from an older client is ignored. */
+  router.get("/filter-options", (_req, res) => {
     const rows = deps.db
       .select({ kind: filterOptions.kind, value: filterOptions.value })
       .from(filterOptions)

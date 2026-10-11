@@ -133,14 +133,9 @@ paths:
       summary: >
         The genres, styles, format names and countries the filter dialog offers,
         each list most common first. Built when the catalogue is imported, so it
-        does not follow filters or fades and carries no counts. With
-        enriched=only the lists are counted over the enriched releases instead.
-      parameters:
-        - name: enriched
-          in: query
-          schema:
-            type: string
-            enum: [only]
+        does not follow filters, fades or enrichment and carries no counts. The
+        Enriched page offers the same lists as Explore; an enriched parameter
+        sent by an older client is ignored.
       responses:
         "200":
           description: Filter options
@@ -148,12 +143,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReleaseFilterOptionsDto"
-        "400":
-          description: Invalid query parameters
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorDto"
   /releases/{id}:
     get:
       operationId: getRelease

@@ -49,7 +49,7 @@ An enrichment run that also re-fetches releases enriched before and overwrites t
 _Avoid_: Re-index, force
 
 **Enriched release**:
-A release an enrichment run has fetched from the Discogs API (it has an `enriched_at`). `enriched=only` on the release list and filter-options endpoints keeps only these.
+A release an enrichment run has fetched from the Discogs API (it has an `enriched_at`). `enriched=only` on the release list keeps only these. The filter options are not narrowed to them: the Enriched page offers the same static list as Explore (fader-ui#112).
 _Avoid_: Rated release, indexed release
 
 **Missing release**:
