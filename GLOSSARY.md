@@ -46,6 +46,10 @@ _Avoid_: Restore, unhide
 
 ## Who uses it
 
+**Saved filter**:
+A filter a collector kept on Explore: a name and the Explore URL query (without the page, sort kept). Per collector, unique on the query, no cap. Stored in `saved_filters` and carried over by the dump import, like fades.
+_Avoid_: Preset, bookmark
+
 **Collector**:
 A person using Fader to browse releases. Each collector has their own fades.
 _Avoid_: User, customer

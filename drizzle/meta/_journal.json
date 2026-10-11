@@ -162,6 +162,13 @@
       "when": 1791673747394,
       "tag": "0022_filter_options",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1791709132879,
+      "tag": "0023_saved_filters",
+      "breakpoints": true
     }
   ]
 }

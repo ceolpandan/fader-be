@@ -256,6 +256,101 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /saved-filters:
+    get:
+      operationId: listSavedFilters
+      summary: The signed-in user's saved Explore filters
+      description: In the order they were saved, oldest first.
+      responses:
+        "200":
+          description: Saved filters
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SavedFilterDto" }
+    post:
+      operationId: createSavedFilter
+      summary: Save an Explore filter
+      description: >
+        Stores the filter under the given name. A user can save any number of
+        filters, but each query only once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSavedFilterRequestDto"
+      responses:
+        "201":
+          description: The saved filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedFilterDto"
+        "400":
+          description: The name or query is empty or too long
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: The user already saved this query; nothing is created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /saved-filters/{id}:
+    patch:
+      operationId: renameSavedFilter
+      summary: Rename a saved filter
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameSavedFilterRequestDto"
+      responses:
+        "200":
+          description: The saved filter after the rename
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedFilterDto"
+        "400":
+          description: The name is empty or too long
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: No such saved filter for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+    delete:
+      operationId: deleteSavedFilter
+      summary: Delete a saved filter
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: No such saved filter for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /settings:
     get:
       operationId: getSettings
@@ -529,6 +624,41 @@ components:
           description: >
             Releases the fade hides: the master's versions, or 1 for a release
             without a master. Null unless lookupStatus is done.
+
+    SavedFilterDto:
+      type: object
+      required: [id, name, query, createdAt]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        query:
+          type: string
+          description: >
+            The Explore URL query without page and without a leading "?"; apply
+            it by opening /explore?query.
+        createdAt: { type: string, format: date-time }
+
+    CreateSavedFilterRequestDto:
+      type: object
+      required: [name, query]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          description: Trimmed; must not be empty.
+        query:
+          type: string
+          maxLength: 4000
+          description: Must not be empty. A leading "?" is dropped.
+
+    RenameSavedFilterRequestDto:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          description: Trimmed; must not be empty.
 
     SettingsDto:
       type: object

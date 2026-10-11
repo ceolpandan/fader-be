@@ -154,6 +154,22 @@ export const userSettings = sqliteTable("user_settings", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * A filter a collector saved on Explore: `query` is the Explore URL query without `page` (sort
+ * kept), so applying it is navigating to `/explore?<query>`. One row per collector and query.
+ */
+export const savedFilters = sqliteTable(
+  "saved_filters",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    uid: text("uid").notNull(),
+    name: text("name").notNull(),
+    query: text("query").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("saved_filters_uid_query_idx").on(table.uid, table.query)],
+);
+
 /** What a user faded: a master (hides every version under it) or a release without a master. */
 export const fades = sqliteTable(
   "fades",

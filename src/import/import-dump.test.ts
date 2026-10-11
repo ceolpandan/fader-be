@@ -113,10 +113,11 @@ describe("importDump", () => {
     expect(stats.kept).toBe(3);
   });
 
-  it("carries over only fades and user settings from the old database", async () => {
+  it("carries over only fades, user settings and saved filters from the old database", async () => {
     await importDump({ dumpPath: path.join(dir, "releases.xml"), outPath: path.join(dir, "old.sqlite") });
     const old = new Database(path.join(dir, "old.sqlite"));
     old.exec(`
+      INSERT INTO saved_filters (id, uid, name, query, created_at) VALUES (7, 'u1', 'Dub', 'tracks=2&sort=-year', 300);
       INSERT INTO fades (uid, kind, id, created_at, lookup_status, title) VALUES ('u1', 'master', 1660109, 100, 'done', 'Stockholm');
       INSERT INTO user_settings (uid, theme, updated_at) VALUES ('u1', 'light', 200);
       INSERT INTO releases (id, title, genres, styles, formats, artists) VALUES (99, 'Old only', '["Electronic"]', '[]', '[]', '[]');
@@ -135,7 +136,28 @@ describe("importDump", () => {
       { uid: "u1", kind: "master", id: 1660109, lookup_status: "done", title: "Stockholm" },
     ]);
     expect(db.prepare("SELECT uid, theme FROM user_settings").all()).toEqual([{ uid: "u1", theme: "light" }]);
+    expect(db.prepare("SELECT id, uid, name, query FROM saved_filters").all()).toEqual([
+      { id: 7, uid: "u1", name: "Dub", query: "tracks=2&sort=-year" },
+    ]);
     expect(db.prepare("SELECT count(*) c FROM releases WHERE id = 99").get()).toEqual({ c: 0 });
+    db.close();
+  });
+
+  it("carries over from a database that predates saved filters", async () => {
+    await importDump({ dumpPath: path.join(dir, "releases.xml"), outPath: path.join(dir, "old.sqlite") });
+    const old = new Database(path.join(dir, "old.sqlite"));
+    old.exec(`DROP TABLE saved_filters; INSERT INTO user_settings (uid, theme, updated_at) VALUES ('u1', 'light', 200);`);
+    old.close();
+
+    await importDump({
+      dumpPath: path.join(dir, "releases.xml"),
+      outPath: path.join(dir, "new.sqlite"),
+      carryOverFrom: path.join(dir, "old.sqlite"),
+    });
+
+    const db = open("new.sqlite");
+    expect(db.prepare("SELECT uid FROM user_settings").all()).toEqual([{ uid: "u1" }]);
+    expect(db.prepare("SELECT count(*) c FROM saved_filters").get()).toEqual({ c: 0 });
     db.close();
   });
 

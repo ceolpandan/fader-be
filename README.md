@@ -33,6 +33,10 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 - `GET /releases` — paginated, filterable list of the stored releases (`?page=&pageSize=&sort=` and the filters)
 - `GET /releases/filter-options` — the genres, styles, formats and countries the filter dialog offers, most common first
 
+### Saved filters
+
+- `GET /saved-filters`, `POST /saved-filters` (409 when the collector already saved that query), `PATCH /saved-filters/:id` (rename) and `DELETE /saved-filters/:id`
+
 Set `DISCOGS_TOKEN` (personal access token from
 https://www.discogs.com/settings/developers) to raise Discogs' rate limit.
 Unauthenticated requests work but are limited to 25/min. `DB_PATH` controls where the
@@ -59,10 +63,10 @@ src/
   app.ts             express app + middleware wiring
   discogs-client.ts  fetch wrapper for the real Discogs API
   db/                Drizzle schema (releases, fades, master_versions,
-                     discogs_queue_jobs, user_settings) + db client
+                     discogs_queue_jobs, user_settings, saved_filters) + db client
   queue/             generic rate-limited, durable job queue (DiscogsQueue)
   indexing/          queue job handlers: release detail, fade lookup
-  routes/            releases.ts, masters.ts, fade.ts, settings.ts
+  routes/            releases.ts, masters.ts, fade.ts, saved-filters.ts, settings.ts
   types/             raw Discogs API response types
   dto/               our DTOs (all Discogs release/master fields kept for now) + mappers
   docs/              openapi.yaml served via Swagger UI

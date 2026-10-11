@@ -19,7 +19,7 @@ export interface ImportOptions {
   genre?: string;
   /** Read only evenly spaced chunks of the file (plain `.xml` only), for a sample database. */
   sample?: { chunks: number; chunkBytes: number };
-  /** An existing database to carry the fades and user settings over from. */
+  /** An existing database to carry the fades, user settings and saved filters over from. */
   carryOverFrom?: string;
   migrationsFolder?: string;
   log?: (message: string) => void;
@@ -38,8 +38,8 @@ const READ_BYTES = 8 * 1024 * 1024;
 
 /**
  * Builds a new database from the Discogs releases dump: the migrations, then every release with
- * the genre, then the indexes (built after the load, which is much faster). Only the fades and
- * user settings are carried over from `carryOverFrom`. Swap the file in by pointing `DB_PATH` at
+ * the genre, then the indexes (built after the load, which is much faster). Only the fades, user
+ * settings and saved filters are carried over from `carryOverFrom`. Swap the file in by pointing `DB_PATH` at
  * it with the API stopped.
  */
 export async function importDump(options: ImportOptions): Promise<ImportStats> {
@@ -123,12 +123,12 @@ export async function importDump(options: ImportOptions): Promise<ImportStats> {
   }
 }
 
-/** Copies `fades` and `user_settings`, by the columns both databases have. Returns the fades copied. */
+/** Copies `fades`, `user_settings` and `saved_filters`, by the columns both databases have. Returns the fades copied. */
 function carryOver(target: Database.Database, oldPath: string): number {
   target.prepare("ATTACH DATABASE ? AS old").run(oldPath);
   try {
     let fades = 0;
-    for (const table of ["fades", "user_settings"]) {
+    for (const table of ["fades", "user_settings", "saved_filters"]) {
       const columns = (schema: string) =>
         (target.prepare(`PRAGMA ${schema}.table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
       const inOld = columns("old");
@@ -136,6 +136,7 @@ function carryOver(target: Database.Database, oldPath: string): number {
         .filter((c) => inOld.includes(c))
         .map((c) => `"${c}"`)
         .join(", ");
+      if (!list) continue; // an older database without this table
       const { changes } = target.prepare(`INSERT OR IGNORE INTO main.${table} (${list}) SELECT ${list} FROM old.${table}`).run();
       if (table === "fades") fades = changes;
     }
