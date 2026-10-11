@@ -241,6 +241,16 @@ export function finishRunWhenSettled(db: Db, job: { type: string; runId: string 
     .run();
 }
 
+/**
+ * On startup: a run the server stopped after its last job settled but before the run was marked
+ * done has nothing left to wait for, so it is finished here. A run with jobs left is resumed by
+ * the queue, which starts every collector's pending jobs again.
+ */
+export function finishRunsWithNothingLeft(db: Db): void {
+  const running = db.select({ id: enrichmentRuns.id }).from(enrichmentRuns).where(eq(enrichmentRuns.status, "running")).all();
+  for (const { id } of running) finishRunWhenSettled(db, { type: "release_detail", runId: id });
+}
+
 /** Queue listener: Discogs refused the token or stayed down, so the run ended early. */
 export function failRun(db: Db, runId: string, cause: unknown): void {
   const errorMessage =

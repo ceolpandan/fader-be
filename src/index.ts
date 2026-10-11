@@ -5,7 +5,7 @@ import { createApp } from "./app";
 import { createDb } from "./db/client";
 import { getDiscogsToken } from "./db/discogs-tokens";
 import { getAllMasterVersionReleaseIds, getRelease } from "./discogs-client";
-import { failRun, finishRunWhenSettled } from "./enrichment/enrichment-run";
+import { failRun, finishRunsWithNothingLeft, finishRunWhenSettled } from "./enrichment/enrichment-run";
 import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
@@ -43,6 +43,8 @@ queue.registerHandler(
 queue.onSettled((job) => markFadeLookupFailed(db, job));
 queue.onSettled((job) => finishRunWhenSettled(db, job));
 queue.onRunAborted((runId, cause) => failRun(db, runId, cause));
+// Runs and their jobs are stored, so a run the server stopped in the middle of carries on.
+finishRunsWithNothingLeft(db);
 queue.start();
 
 const app = createApp({ db, queue });
