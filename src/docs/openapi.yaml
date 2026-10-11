@@ -93,6 +93,20 @@ paths:
         - name: yearMax
           in: query
           schema: { type: integer }
+        - name: q
+          in: query
+          description: >
+            Search text, at most 200 characters. Every word must be in the title
+            or in one of the artist names, in any case.
+          schema: { type: string, maxLength: 200 }
+        - name: enriched
+          in: query
+          description: >
+            only keeps releases an enrichment run has fetched, and adds
+            enrichedCount to the response.
+          schema:
+            type: string
+            enum: [only]
         - name: sort
           in: query
           schema:
@@ -119,7 +133,14 @@ paths:
       summary: >
         The genres, styles, format names and countries the filter dialog offers,
         each list most common first. Built when the catalogue is imported, so it
-        does not follow filters or fades and carries no counts.
+        does not follow filters or fades and carries no counts. With
+        enriched=only the lists are counted over the enriched releases instead.
+      parameters:
+        - name: enriched
+          in: query
+          schema:
+            type: string
+            enum: [only]
       responses:
         "200":
           description: Filter options
@@ -127,6 +148,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReleaseFilterOptionsDto"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /releases/{id}:
     get:
       operationId: getRelease
@@ -891,6 +918,11 @@ components:
         fadedCount:
           type: integer
           description: How many releases the user has faded. Ignores filters.
+        enrichedCount:
+          type: integer
+          description: >
+            Only with enriched=only: every enriched release the user can see,
+            whatever the other filters.
 
     ReleaseFilterOptionsDto:
       type: object

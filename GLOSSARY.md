@@ -44,6 +44,10 @@ _Avoid_: Scan, indexing, sync
 An enrichment run that also re-fetches releases enriched before and overwrites them (and releases marked missing).
 _Avoid_: Re-index, force
 
+**Enriched release**:
+A release an enrichment run has fetched from the Discogs API (it has an `enriched_at`). `enriched=only` on the release list and filter-options endpoints keeps only these.
+_Avoid_: Rated release, indexed release
+
 **Missing release**:
 A release an enrichment run found Discogs no longer has (a 404 after retries). It is marked `missing_at` and Explore hides it; a fresh enrichment clears the mark if Discogs finds it again.
 _Avoid_: Deleted release, dead release

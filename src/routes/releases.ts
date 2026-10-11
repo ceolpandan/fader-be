@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "../db/client";
 import { isFadedViaFades, isNotFadedFor } from "../db/fades";
 import { getDiscogsToken } from "../db/discogs-tokens";
+import { isEnriched } from "../db/enriched";
 import { isNotMissing } from "../db/missing";
 import { filterOptions, releases, type FilterOptionKind } from "../db/schema";
 import type { ReleaseFilterOptionsDto, ReleaseListPageDto } from "../dto/release-list.dto";
@@ -45,7 +46,34 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       .where(and(...where))
       .all()[0]!.count;
 
-  router.get("/filter-options", (_req, res) => {
+  /** The same lists as `filter_options`, counted over the enriched releases only. */
+  function enrichedFilterOptions(): ReleaseFilterOptionsDto {
+    const scope = sql`${isEnriched} AND ${isNotMissing}`;
+    const valuesOf = (query: SQL) => deps.db.all<{ value: string }>(query).map((row) => row.value);
+    const fromSideTable = (table: string, column: string) =>
+      valuesOf(
+        sql`SELECT ${sql.raw(`s.${column}`)} AS value FROM ${sql.raw(table)} s JOIN releases ON releases.id = s.release_id
+            WHERE ${scope} GROUP BY value ORDER BY count(*) DESC, value`,
+      );
+    return {
+      genres: fromSideTable("release_genres", "genre"),
+      styles: fromSideTable("release_styles", "style"),
+      formats: fromSideTable("release_formats", "format"),
+      countries: valuesOf(
+        sql`SELECT country AS value FROM releases WHERE country IS NOT NULL AND ${scope} GROUP BY country ORDER BY count(*) DESC, country`,
+      ),
+    };
+  }
+
+  router.get("/filter-options", (req, res) => {
+    if (req.query.enriched !== undefined) {
+      if (req.query.enriched !== "only") {
+        res.status(400).json({ error: "enriched must be only" });
+        return;
+      }
+      res.json(enrichedFilterOptions());
+      return;
+    }
     const rows = deps.db
       .select({ kind: filterOptions.kind, value: filterOptions.value })
       .from(filterOptions)
@@ -100,6 +128,9 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
       total,
       fadedCount: countReleases(isNotMissing, isFadedViaFades(uid)),
     };
+    if (req.query.enriched === "only") {
+      dto.enrichedCount = countReleases(isNotMissing, isNotFadedFor(uid), isEnriched);
+    }
     res.json(dto);
   });
 
