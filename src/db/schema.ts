@@ -60,6 +60,11 @@ export const releases = sqliteTable(
     enrichedAt: integer("enriched_at", { mode: "timestamp" }),
     /** When an enrichment run found Discogs no longer has the release; Explore hides it. */
     missingAt: integer("missing_at", { mode: "timestamp" }),
+    /**
+     * How many stored releases share this release's master (1 without one): what fading its
+     * master clears. Counted by `refreshVersionCounts`, which the importer runs after the load.
+     */
+    versionCount: integer("version_count").notNull().default(1),
     trackCount: integer("track_count").generatedAlwaysAs(sql`json_array_length(tracklist)`, { mode: "virtual" }),
     artistSort: text("artist_sort").generatedAlwaysAs(sql`json_extract(artists, '$[0].name')`, { mode: "virtual" }),
     formatSort: text("format_sort").generatedAlwaysAs(sql`json_extract(formats, '$[0].name')`, { mode: "virtual" }),
@@ -73,6 +78,8 @@ export const releases = sqliteTable(
     // Serves the track-count sort, which puts releases with no tracks last.
     index("releases_track_count_idx").on(sql`(${table.trackCount} = 0)`, sql`${table.trackCount} DESC`, table.id),
     index("releases_country_idx").on(table.country, table.id),
+    // Serves the most-versions-first sort.
+    index("releases_version_count_idx").on(sql`${table.versionCount} DESC`, table.id),
     // Serves the rating sort, which puts releases that were never enriched last.
     index("releases_rating_idx").on(sql`(${table.ratingAverage} IS NULL)`, sql`${table.ratingAverage} DESC`, table.id),
   ],

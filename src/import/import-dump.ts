@@ -6,6 +6,7 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import zlib from "node:zlib";
 import { rebuildFilterOptions } from "../db/filter-options";
+import { refreshVersionCounts } from "../db/version-counts";
 import { createReleaseParser, toReleaseRow, type DumpRelease } from "./release-xml";
 
 export interface ImportOptions {
@@ -128,6 +129,8 @@ export async function importDump(options: ImportOptions): Promise<ImportStats> {
       log(`  ${index.name} ${((Date.now() - t) / 1000).toFixed(1)}s`);
     }
     rebuildFilterOptions(sqlite);
+    log("Counting versions per master");
+    refreshVersionCounts(sqlite);
     sqlite.exec("ANALYZE");
 
     if (options.carryOverFrom) stats.fadesCarried = carryOver(sqlite, options.carryOverFrom);

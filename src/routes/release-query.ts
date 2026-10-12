@@ -2,7 +2,7 @@ import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import type { Request } from "express";
 import { releaseFormats, releaseGenres, releaseStyles, releases } from "../db/schema";
 
-const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks"] as const;
+const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks", "versions"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
 const SORT_OPTIONS = SORT_FIELDS.flatMap((field) => [field, `-${field}`]) as string[];
 
@@ -121,6 +121,8 @@ function sortColumn(field: SortField) {
       return releases.ratingAverage;
     case "tracks":
       return releases.trackCount;
+    case "versions":
+      return releases.versionCount;
   }
 }
 

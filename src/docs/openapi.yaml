@@ -104,7 +104,7 @@ paths:
           schema:
             type: string
             enum:
-              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks]
+              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks, versions, -versions]
             default: title
       responses:
         "200":
@@ -843,7 +843,7 @@ components:
     ReleaseListItemDto:
       type: object
       required:
-        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, artists, labels]
+        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, artists, labels, versionCount]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -872,6 +872,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReleaseLabelDto"
+        versionCount:
+          type: integer
+          minimum: 1
+          description: Stored releases under the same master, this one included (1 without a master). What fading its master clears.
 
     ReleaseLabelDto:
       type: object

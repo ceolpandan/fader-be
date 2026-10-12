@@ -12,6 +12,10 @@ _Avoid_: Record, album, product, item
 The Discogs grouping of all versions of the same work. A release belongs to at most one master.
 _Avoid_: Album, group
 
+**Version count**:
+How many stored releases share a release's master (1 without a master), which is how many releases fading its master clears. Stored on the release (`version_count`) and counted by the importer, not by Discogs. Explore sorts by it with `sort=-versions`.
+_Avoid_: Edition count, master size
+
 **Release detail**:
 What we show about one release beyond its grid row: title, artists, tracklist and video links.
 _Avoid_: Release info, release page
