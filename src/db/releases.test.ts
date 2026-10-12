@@ -51,6 +51,7 @@ describe("releases table", () => {
       ratingCount: null,
       enrichedAt: null,
       missingAt: null,
+      versionCount: 1,
       artistSort: "The Persuader",
       formatSort: "Vinyl",
     });

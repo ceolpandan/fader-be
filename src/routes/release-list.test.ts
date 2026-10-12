@@ -8,6 +8,7 @@ import type { Express } from "express";
 import { eq, inArray } from "drizzle-orm";
 import { createDb, type Db } from "../db/client";
 import { rebuildFilterOptions } from "../db/filter-options";
+import { refreshVersionCounts } from "../db/version-counts";
 import { fades, releases } from "../db/schema";
 import { DiscogsQueue } from "../queue/discogs-queue";
 import { createApp } from "../app";
@@ -113,6 +114,7 @@ describe("GET /releases and /releases/filter-options", () => {
           ratingCount: null,
           artists: [{ id: 7, name: "Band" }],
           labels: [],
+          versionCount: 1,
         },
       ]);
     });
@@ -201,6 +203,38 @@ describe("GET /releases and /releases/filter-options", () => {
 
       expect(titles((await get("/releases?sort=tracks")).body)).toEqual(["Two", "Five", "None"]);
       expect(titles((await get("/releases?sort=-tracks")).body)).toEqual(["Five", "Two", "None"]);
+    });
+
+    it("sorts by version count, counting the releases under the same master (1 without one)", async () => {
+      seedRelease(1, "Solo");
+      seedRelease(2, "Pair A", { masterId: 20 });
+      seedRelease(3, "Pair B", { masterId: 20 });
+      seedRelease(4, "Trio A", { masterId: 30 });
+      seedRelease(5, "Trio B", { masterId: 30 });
+      seedRelease(6, "Trio C", { masterId: 30 });
+      refreshVersionCounts(db.$client);
+
+      const most = await get("/releases?sort=-versions");
+      expect(titles(most.body)).toEqual(["Trio A", "Trio B", "Trio C", "Pair A", "Pair B", "Solo"]);
+      expect(most.body.items.map((item: { versionCount: number }) => item.versionCount)).toEqual([3, 3, 3, 2, 2, 1]);
+      expect(titles((await get("/releases?sort=versions")).body)).toEqual([
+        "Solo",
+        "Pair A",
+        "Pair B",
+        "Trio A",
+        "Trio B",
+        "Trio C",
+      ]);
+    });
+
+    it("refreshes version counts after releases are removed", () => {
+      seedRelease(1, "A", { masterId: 5 });
+      seedRelease(2, "B", { masterId: 5 });
+      refreshVersionCounts(db.$client);
+      db.delete(releases).where(eq(releases.id, 2)).run();
+      refreshVersionCounts(db.$client);
+
+      expect(db.select({ n: releases.versionCount }).from(releases).where(eq(releases.id, 1)).get()).toEqual({ n: 1 });
     });
 
     it("filters by track count, with 7+ meaning seven or more", async () => {

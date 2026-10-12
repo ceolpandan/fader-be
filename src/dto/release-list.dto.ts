@@ -22,6 +22,8 @@ export interface ReleaseListItemDto {
   ratingCount: number | null;
   artists: ReleaseArtistStub[];
   labels: ReleaseLabel[];
+  /** Stored releases under the same master, this one included (1 without a master): what fading its master clears. */
+  versionCount: number;
 }
 
 export interface ReleaseListPageDto {
