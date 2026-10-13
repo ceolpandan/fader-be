@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "ts-node --transpile-only scripts/migrate.ts",
-    "db:import": "ts-node --transpile-only scripts/import-dump.ts"
+    "db:import": "ts-node --transpile-only scripts/import-dump.ts",
+    "db:requeue-have-want": "ts-node --transpile-only scripts/requeue-have-want.ts"
   },
   "keywords": [],
   "author": "",

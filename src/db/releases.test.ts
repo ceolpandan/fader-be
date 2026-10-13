@@ -49,6 +49,8 @@ describe("releases table", () => {
       trackCount: 1,
       ratingAverage: null,
       ratingCount: null,
+      haveCount: null,
+      wantCount: null,
       enrichedAt: null,
       missingAt: null,
       versionCount: 1,

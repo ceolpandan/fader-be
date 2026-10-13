@@ -1,0 +1,1 @@
+CREATE INDEX `releases_have_count_idx` ON `releases` (`have_count`,`id`) WHERE "releases"."have_count" IS NOT NULL;

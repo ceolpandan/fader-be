@@ -56,6 +56,9 @@ export const releases = sqliteTable(
     /** Discogs community rating, from an enrichment run (fader-ui#109); null until enriched. */
     ratingAverage: real("rating_average"),
     ratingCount: integer("rating_count"),
+    /** How many collectors have / want the release on Discogs; null until enriched with them. */
+    haveCount: integer("have_count"),
+    wantCount: integer("want_count"),
     /** When an enrichment run last refreshed the row from the Discogs API. */
     enrichedAt: integer("enriched_at", { mode: "timestamp" }),
     /** When an enrichment run found Discogs no longer has the release; Explore hides it. */
@@ -82,6 +85,10 @@ export const releases = sqliteTable(
     index("releases_version_count_idx").on(sql`${table.versionCount} DESC`, table.id),
     // Serves the rating sort, which puts releases that were never enriched last.
     index("releases_rating_idx").on(sql`(${table.ratingAverage} IS NULL)`, sql`${table.ratingAverage} DESC`, table.id),
+    // Serves the haves/wants filters, which only ever match the few enriched releases.
+    index("releases_have_count_idx")
+      .on(table.haveCount, table.id)
+      .where(sql`${table.haveCount} IS NOT NULL`),
   ],
 );
 

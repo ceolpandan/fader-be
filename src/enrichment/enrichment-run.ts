@@ -133,6 +133,44 @@ export function startRun(db: Db, queue: DiscogsQueue, uid: string, query: string
     .all()
     .map((row) => row.id);
 
+  return { run: createRun(db, queue, uid, query, fresh, ids, countWhere(db, scope.inScope) - ids.length) };
+}
+
+/**
+ * Queues a `release_detail` job for every release that was enriched before haves and wants were
+ * stored, so a run refreshes them. Unlike a filter run it has no cap, and it can be started with
+ * the server stopped: the jobs are stored and the queue picks them up on its next start.
+ */
+export function startHaveWantBackfill(db: Db, queue: DiscogsQueue, uid: string): StartResult {
+  if (activeRun(db, uid)) return { conflict: "run_active" };
+  const toFetch = [
+    isNotFadedFor(uid),
+    isNotMissing,
+    sql`${releases.enrichedAt} IS NOT NULL`,
+    sql`${releases.haveCount} IS NULL`,
+  ];
+  const queued = queuedReleaseIds(db);
+  if (queued.length > 0) toFetch.push(sql`${releases.id} NOT IN (SELECT value FROM json_each(${JSON.stringify(queued)}))`);
+
+  const ids = db
+    .select({ id: releases.id })
+    .from(releases)
+    .where(and(...toFetch))
+    .orderBy(releases.id)
+    .all()
+    .map((row) => row.id);
+  return { run: createRun(db, queue, uid, "", false, ids, 0) };
+}
+
+function createRun(
+  db: Db,
+  queue: DiscogsQueue,
+  uid: string,
+  query: string,
+  fresh: boolean,
+  ids: number[],
+  skipped: number,
+): RunRow {
   const id = randomUUID();
   const startedAt = new Date();
   db.transaction(() => {
@@ -145,7 +183,7 @@ export function startRun(db: Db, queue: DiscogsQueue, uid: string, query: string
         fresh,
         status: ids.length > 0 ? "running" : "done",
         total: ids.length,
-        skipped: countWhere(db, scope.inScope) - ids.length,
+        skipped,
         startedAt,
         finishedAt: ids.length > 0 ? null : startedAt,
       })
@@ -154,7 +192,7 @@ export function startRun(db: Db, queue: DiscogsQueue, uid: string, query: string
       queue.enqueue({ runId: id, type: "release_detail", payload: { uid, releaseId } });
     }
   });
-  return { run: db.select().from(enrichmentRuns).where(eq(enrichmentRuns.id, id)).get()! };
+  return db.select().from(enrichmentRuns).where(eq(enrichmentRuns.id, id)).get()!;
 }
 
 /** Only the latest run of a collector is kept: its row, its not-found list and its finished jobs. */
