@@ -26,6 +26,8 @@ paths:
           in: query
           schema: { type: integer, default: 50 }
         - $ref: "#/components/parameters/StyleCombo"
+        - $ref: "#/components/parameters/OnlyStyleCombo"
+        - $ref: "#/components/parameters/ExcludeStyleCombo"
         - name: genre
           in: query
           description: Comma-separated genre names, OR-matched
@@ -93,6 +95,18 @@ paths:
         - name: yearMax
           in: query
           schema: { type: integer }
+        - name: ratingCountMin
+          in: query
+          description: >
+            At least this many collectors have rated the release on Discogs. The count is only known
+            for enriched releases, so this leaves out the rest.
+          schema: { type: integer, minimum: 0 }
+        - name: ratingMin
+          in: query
+          description: >
+            The average rating on Discogs is at least this, from 0 to 5. The rating is only known
+            for enriched releases, so this leaves out the rest.
+          schema: { type: number, minimum: 0, maximum: 5 }
         - name: haveMax
           in: query
           description: >
@@ -815,6 +829,28 @@ components:
         A style combination: comma-separated style names a release must all have.
         Repeat the parameter for several combinations; a release passes when it
         matches any one of them.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { type: string }
+    OnlyStyleCombo:
+      name: onlyStyleCombo
+      in: query
+      description: >
+        Like styleCombo, but the release must have exactly those styles and no others. Repeat
+        the parameter for several combinations; a release passes when it matches any one of them.
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { type: string }
+    ExcludeStyleCombo:
+      name: excludeStyleCombo
+      in: query
+      description: >
+        A style combination to leave out: releases that have every one of these styles are
+        dropped. Repeat the parameter for several combinations; a release must match none.
       style: form
       explode: true
       schema:

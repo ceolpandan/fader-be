@@ -55,9 +55,21 @@ function hasAllStyles(styles: string[]): SQL {
   return sql`(${sql.join(each, sql` AND `)})`;
 }
 
-/** The release matches at least one combination. */
-function styleCombinationsFilter(combinations: string[][]): SQL {
-  return sql`(${sql.join(combinations.map(hasAllStyles), sql` OR `)})`;
+/** The release has exactly the styles of the combination: every one of them and no other. */
+function hasExactlyStyles(styles: string[]): SQL {
+  return sql`(${hasAllStyles(styles)} AND ${hasOnly("style", styles)})`;
+}
+
+/**
+ * The combinations condition: the release matches at least one `include` combination, at least
+ * one `only` combination, and none of the `exclude` ones. Each group that is given must hold.
+ */
+function styleCombinationsFilter(groups: { include: string[][]; only: string[][]; exclude: string[][] }): SQL | null {
+  const conditions: SQL[] = [];
+  if (groups.include.length > 0) conditions.push(sql`(${sql.join(groups.include.map(hasAllStyles), sql` OR `)})`);
+  if (groups.only.length > 0) conditions.push(sql`(${sql.join(groups.only.map(hasExactlyStyles), sql` OR `)})`);
+  for (const styles of groups.exclude) conditions.push(sql`NOT ${hasAllStyles(styles)}`);
+  return conditions.length > 0 ? sql`(${sql.join(conditions, sql` AND `)})` : null;
 }
 
 /** Each `styleCombo` occurrence as a list of styles; empty ones dropped, identical ones (in any order) deduped. */
@@ -160,6 +172,12 @@ function parseOptionalRatio(value: unknown, name: string): { value?: number; err
   return Number.isFinite(parsed) && parsed > 0 ? { value: parsed } : { error: `${name} must be a positive number` };
 }
 
+function parseOptionalRating(value: unknown, name: string): { value?: number; error?: string } {
+  if (value === undefined) return {};
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 5 ? { value: parsed } : { error: `${name} must be a number from 0 to 5` };
+}
+
 /** Reads `page`, `pageSize`, the filters and `sort` from the query string; `error` is the 400 message. */
 export function parseReleaseQuery(
   req: Pick<Request, "query">,
@@ -175,6 +193,12 @@ export function parseReleaseQuery(
   if (yearMin.error) return { error: yearMin.error };
   const yearMax = parseOptionalInt(req.query.yearMax, "yearMax");
   if (yearMax.error) return { error: yearMax.error };
+
+  const ratingCountMin = parseOptionalCount(req.query.ratingCountMin, "ratingCountMin");
+  if (ratingCountMin.error) return { error: ratingCountMin.error };
+
+  const ratingMin = parseOptionalRating(req.query.ratingMin, "ratingMin");
+  if (ratingMin.error) return { error: ratingMin.error };
 
   const haveMax = parseOptionalCount(req.query.haveMax, "haveMax");
   if (haveMax.error) return { error: haveMax.error };
@@ -230,6 +254,10 @@ export function parseReleaseQuery(
   if (noLinks === "exclude") filters.push(sql`json_array_length(${releases.videos}) > 0`);
   if (yearMin.value !== undefined) filters.push(gte(releases.year, yearMin.value));
   if (yearMax.value !== undefined) filters.push(lte(releases.year, yearMax.value));
+  // The rating count is only known for enriched releases, so this leaves out the rest.
+  if (ratingCountMin.value !== undefined) filters.push(gte(releases.ratingCount, ratingCountMin.value));
+  // The average rating is only known for enriched releases, so this leaves out the rest.
+  if (ratingMin.value !== undefined) filters.push(gte(releases.ratingAverage, ratingMin.value));
   // Haves and wants are only known for enriched releases, so any of these leaves out the rest.
   if (haveMax.value !== undefined || wantMin.value !== undefined || wantRatioMin.value !== undefined) {
     filters.push(sql`${releases.haveCount} IS NOT NULL`, sql`${releases.wantCount} IS NOT NULL`);
@@ -241,8 +269,11 @@ export function parseReleaseQuery(
     filters.push(sql`${releases.wantCount} >= ${wantRatioMin.value} * MAX(${releases.haveCount}, 1)`);
   }
 
-  const combinations = parseStyleCombinations(req.query.styleCombo);
-  const styleCombinations = combinations.length > 0 ? styleCombinationsFilter(combinations) : null;
+  const styleCombinations = styleCombinationsFilter({
+    include: parseStyleCombinations(req.query.styleCombo),
+    only: parseStyleCombinations(req.query.onlyStyleCombo),
+    exclude: parseStyleCombinations(req.query.excludeStyleCombo),
+  });
 
   if (sortField === "rarity") {
     // Wants per have, a release nobody has counting as one have. Releases without counts, or with
