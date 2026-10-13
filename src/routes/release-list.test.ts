@@ -161,6 +161,31 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(titles((await get("/releases?wantMin=40&haveMax=100")).body)).toEqual(["Rare"]);
     });
 
+    it("filters by the minimum number of ratings, leaving out releases without a count", async () => {
+      for (const [id, title] of [[1, "Many"], [2, "Few"], [3, "Never enriched"]] as const) {
+        seedRelease(id, title);
+      }
+      db.update(releases).set({ ratingCount: 120 }).where(eq(releases.id, 1)).run();
+      db.update(releases).set({ ratingCount: 3 }).where(eq(releases.id, 2)).run();
+
+      expect(titles((await get("/releases?ratingCountMin=10")).body)).toEqual(["Many"]);
+      expect(titles((await get("/releases?ratingCountMin=3")).body)).toEqual(["Few", "Many"]);
+    });
+
+    it("filters by the minimum average rating, alongside the number of ratings", async () => {
+      for (const [id, title] of [[1, "Loved"], [2, "Meh"], [3, "Loved but few"], [4, "Never enriched"]] as const) {
+        seedRelease(id, title);
+      }
+      const rate = (id: number, ratingAverage: number, ratingCount: number) =>
+        db.update(releases).set({ ratingAverage, ratingCount }).where(eq(releases.id, id)).run();
+      rate(1, 4.5, 50);
+      rate(2, 2.9, 80);
+      rate(3, 4.8, 2);
+
+      expect(titles((await get("/releases?ratingMin=3.5")).body)).toEqual(["Loved", "Loved but few"]);
+      expect(titles((await get("/releases?ratingMin=3.5&ratingCountMin=10")).body)).toEqual(["Loved"]);
+    });
+
     it("searches the title and the artist names: every word must match, in any case", async () => {
       seedRelease(1, "Selected Ambient Works", { artists: [{ id: 1, name: "Aphex Twin" }] });
       seedRelease(2, "Drukqs", { artists: [{ id: 1, name: "Aphex Twin" }] });
@@ -354,7 +379,9 @@ describe("GET /releases and /releases/filter-options", () => {
       ["pageSize=0", "pageSize must be a positive integer"],
       ["yearMin=abc", "yearMin must be an integer"],
       ["yearMax=1.5", "yearMax must be an integer"],
-      ["haveMax=-1", "haveMax must be a non-negative integer"],
+      ["ratingCountMin=-1", "ratingCountMin must be a non-negative integer"],
+      ["ratingMin=6", "ratingMin must be a number from 0 to 5"],
+      ["haveMax=-1","haveMax must be a non-negative integer"],
       ["wantMin=x", "wantMin must be a non-negative integer"],
       ["wantRatioMin=0", "wantRatioMin must be a positive number"],
       ["sort=bogus", "sort must be one of"],
@@ -406,6 +433,31 @@ describe("GET /releases and /releases/filter-options", () => {
       const res = await get("/releases?styleCombo=&styleCombo=Electro,Minimal&styleCombo=Minimal,Electro");
       expect(titles(res.body)).toEqual(["Minimal Electro"]);
       expect((await get("/releases?styleCombo=")).body.total).toBe(5);
+    });
+
+    it("onlyStyleCombo keeps releases with exactly those styles and no others", async () => {
+      seedStyled();
+      expect(titles((await get("/releases?onlyStyleCombo=Minimal,Electro")).body)).toEqual(["Minimal Electro"]);
+      expect(titles((await get("/releases?onlyStyleCombo=Minimal,Ambient")).body)).toEqual([]);
+      expect(titles((await get("/releases?onlyStyleCombo=Minimal&onlyStyleCombo=Electro,Ambient&sort=title")).body)).toEqual([
+        "Electro Ambient",
+        "Minimal only",
+      ]);
+    });
+
+    it("excludeStyleCombo drops releases that have every style of it, keeping those with only some", async () => {
+      seedStyled();
+      const res = await get("/releases?excludeStyleCombo=Minimal,Electro&sort=title");
+      expect(titles(res.body)).toEqual(["Electro Ambient", "Minimal Ambient", "Minimal only", "Untagged"]);
+      const several = await get("/releases?excludeStyleCombo=Minimal,Electro&excludeStyleCombo=Minimal,Ambient&sort=title");
+      expect(titles(several.body)).toEqual(["Electro Ambient", "Minimal only", "Untagged"]);
+      expect(several.body.total).toBe(3);
+    });
+
+    it("ANDs the include, only and exclude combinations", async () => {
+      seedStyled();
+      const res = await get("/releases?styleCombo=Minimal&excludeStyleCombo=Minimal,Electro&sort=title");
+      expect(titles(res.body)).toEqual(["Minimal Ambient", "Minimal only"]);
     });
 
     it("narrows on top of the other filters", async () => {
