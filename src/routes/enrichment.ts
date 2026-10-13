@@ -21,7 +21,7 @@ const MAX_QUERY_LENGTH = 4000;
 
 /**
  * Enrichment runs (fader-ui#109): fetch the releases an Explore filter shows from Discogs, with
- * the collector's own token, to store their community rating. One active run per collector.
+ * the collector's own token, to store their community rating. One active run per collector; starting another filter adds to it.
  */
 export function createEnrichmentRouter(deps: EnrichmentRouterDeps): Router {
   const router = Router();

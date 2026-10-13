@@ -113,9 +113,13 @@ export type StartResult =
   | { conflict: "run_active" }
   | { tooMany: RunPreview };
 
-/** Queues one `release_detail` job per release the filter shows that still needs fetching. */
+/**
+ * Queues one `release_detail` job per release the filter shows that still needs fetching. While
+ * the collector has an active run the releases are added to it instead (behind the jobs already
+ * queued, on the same lane), and the run keeps the query and fresh flag it started with.
+ */
 export function startRun(db: Db, queue: DiscogsQueue, uid: string, query: string, fresh: boolean): StartResult {
-  if (activeRun(db, uid)) return { conflict: "run_active" };
+  const active = activeRun(db, uid);
   const scope = scopeOf(db, uid, query, fresh);
   if ("error" in scope) return scope;
 
@@ -133,7 +137,24 @@ export function startRun(db: Db, queue: DiscogsQueue, uid: string, query: string
     .all()
     .map((row) => row.id);
 
-  return { run: createRun(db, queue, uid, query, fresh, ids, countWhere(db, scope.inScope) - ids.length) };
+  const skipped = countWhere(db, scope.inScope) - ids.length;
+  if (active) return { run: addToRun(db, queue, active, ids, skipped) };
+  return { run: createRun(db, queue, uid, query, fresh, ids, skipped) };
+}
+
+/** Appends releases to a running run: its total and skipped counts grow with them. */
+function addToRun(db: Db, queue: DiscogsQueue, run: RunRow, ids: number[], skipped: number): RunRow {
+  if (ids.length === 0) return run;
+  db.transaction(() => {
+    db.update(enrichmentRuns)
+      .set({ total: run.total + ids.length, skipped: run.skipped + skipped })
+      .where(eq(enrichmentRuns.id, run.id))
+      .run();
+    for (const releaseId of ids) {
+      queue.enqueue({ runId: run.id, type: "release_detail", payload: { uid: run.uid, releaseId } });
+    }
+  });
+  return db.select().from(enrichmentRuns).where(eq(enrichmentRuns.id, run.id)).get()!;
 }
 
 /**

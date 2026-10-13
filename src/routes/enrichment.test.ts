@@ -139,15 +139,29 @@ describe("enrichment routes", () => {
       expect(jobs()).toHaveLength(2);
     });
 
-    it("allows one active run per collector", async () => {
+    it("adds the releases of a second filter to the active run", async () => {
       addToken();
       seed(1);
-      await post("/enrichment/run", { query: "" });
+      const first = await post("/enrichment/run", { query: "" });
+      seed(2);
 
       const res = await post("/enrichment/run", { query: "" });
 
-      expect(res.status).toBe(409);
-      expect(res.body.code).toBe("run_active");
+      expect(res.status).toBe(201);
+      expect(res.body.id).toBe(first.body.id);
+      expect(res.body).toMatchObject({ status: "running", total: 2, remaining: 2 });
+      expect(releaseIdsQueued()).toEqual([1, 2]);
+    });
+
+    it("leaves the active run as it is when the second filter has nothing new", async () => {
+      addToken();
+      seed(1);
+      const first = await post("/enrichment/run", { query: "" });
+
+      const res = await post("/enrichment/run", { query: "" });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ id: first.body.id, total: 1 });
       expect(jobs()).toHaveLength(1);
     });
 
