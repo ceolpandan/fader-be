@@ -147,6 +147,18 @@ function parseOptionalInt(value: unknown, name: string): { value?: number; error
   return Number.isInteger(parsed) ? { value: parsed } : { error: `${name} must be an integer` };
 }
 
+function parseOptionalCount(value: unknown, name: string): { value?: number; error?: string } {
+  const parsed = parseOptionalInt(value, name);
+  if (parsed.error || (parsed.value !== undefined && parsed.value < 0)) return { error: `${name} must be a non-negative integer` };
+  return parsed;
+}
+
+function parseOptionalRatio(value: unknown, name: string): { value?: number; error?: string } {
+  if (value === undefined) return {};
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? { value: parsed } : { error: `${name} must be a positive number` };
+}
+
 /** Reads `page`, `pageSize`, the filters and `sort` from the query string; `error` is the 400 message. */
 export function parseReleaseQuery(req: Pick<Request, "query">): { query: ReleaseQuery } | { error: string } {
   const page = Number(req.query.page ?? 1);
@@ -159,7 +171,14 @@ export function parseReleaseQuery(req: Pick<Request, "query">): { query: Release
   const yearMax = parseOptionalInt(req.query.yearMax, "yearMax");
   if (yearMax.error) return { error: yearMax.error };
 
-  const sortParam = (req.query.sort as string | undefined) ?? "title";
+  const haveMax = parseOptionalCount(req.query.haveMax, "haveMax");
+  if (haveMax.error) return { error: haveMax.error };
+  const wantMin = parseOptionalCount(req.query.wantMin, "wantMin");
+  if (wantMin.error) return { error: wantMin.error };
+  const wantRatioMin = parseOptionalRatio(req.query.wantRatioMin, "wantRatioMin");
+  if (wantRatioMin.error) return { error: wantRatioMin.error };
+
+  const sortParam =(req.query.sort as string | undefined) ?? "title";
   if (!SORT_OPTIONS.includes(sortParam)) {
     return { error: `sort must be one of ${SORT_OPTIONS.join(", ")}` };
   }
@@ -206,6 +225,16 @@ export function parseReleaseQuery(req: Pick<Request, "query">): { query: Release
   if (noLinks === "exclude") filters.push(sql`json_array_length(${releases.videos}) > 0`);
   if (yearMin.value !== undefined) filters.push(gte(releases.year, yearMin.value));
   if (yearMax.value !== undefined) filters.push(lte(releases.year, yearMax.value));
+  // Haves and wants are only known for enriched releases, so any of these leaves out the rest.
+  if (haveMax.value !== undefined || wantMin.value !== undefined || wantRatioMin.value !== undefined) {
+    filters.push(sql`${releases.haveCount} IS NOT NULL`, sql`${releases.wantCount} IS NOT NULL`);
+  }
+  if (haveMax.value !== undefined) filters.push(lte(releases.haveCount, haveMax.value));
+  if (wantMin.value !== undefined) filters.push(gte(releases.wantCount, wantMin.value));
+  // Wants per have; a release nobody has counts as one have, so it never divides by zero.
+  if (wantRatioMin.value !== undefined) {
+    filters.push(sql`${releases.wantCount} >= ${wantRatioMin.value} * MAX(${releases.haveCount}, 1)`);
+  }
 
   const combinations = parseStyleCombinations(req.query.styleCombo);
   const styleCombinations = combinations.length > 0 ? styleCombinationsFilter(combinations) : null;

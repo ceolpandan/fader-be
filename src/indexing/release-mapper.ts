@@ -1,7 +1,7 @@
 import { releases } from "../db/schema";
 import type { DiscogsRelease } from "../types/discogs-api";
 
-/** What an enrichment fetch stores for a release: the Discogs fields we keep, plus the community rating. */
+/** What an enrichment fetch stores for a release: the Discogs fields we keep, plus the community rating, haves and wants. */
 export function mapDiscogsReleaseToRow(raw: DiscogsRelease, enrichedAt: Date): typeof releases.$inferInsert {
   return {
     id: raw.id,
@@ -33,6 +33,8 @@ export function mapDiscogsReleaseToRow(raw: DiscogsRelease, enrichedAt: Date): t
     })),
     ratingAverage: raw.community?.rating?.average ?? null,
     ratingCount: raw.community?.rating?.count ?? null,
+    haveCount: raw.community?.have ?? null,
+    wantCount: raw.community?.want ?? null,
     enrichedAt,
     missingAt: null,
   };

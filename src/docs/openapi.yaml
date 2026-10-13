@@ -93,6 +93,22 @@ paths:
         - name: yearMax
           in: query
           schema: { type: integer }
+        - name: haveMax
+          in: query
+          description: >
+            At most this many collectors have the release on Discogs. Haves, wants and the ratio are
+            only known for enriched releases, so using any of the three leaves the others out.
+          schema: { type: integer, minimum: 0 }
+        - name: wantMin
+          in: query
+          description: At least this many collectors want the release on Discogs.
+          schema: { type: integer, minimum: 0 }
+        - name: wantRatioMin
+          in: query
+          description: >
+            At least this many wants per have (wants / max(haves, 1)), so 3 keeps releases wanted
+            three times as often as they are had.
+          schema: { type: number, exclusiveMinimum: 0 }
         - name: q
           in: query
           description: >

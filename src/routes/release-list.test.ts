@@ -144,6 +144,23 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(filtered.body.total).toBe(2);
     });
 
+    it("filters by haves, wants and wants per have, leaving out releases without them", async () => {
+      for (const [id, title] of [[1, "Rare"], [2, "Common"], [3, "Unwanted"], [4, "Nobody"], [5, "Never enriched"]] as const) {
+        seedRelease(id, title);
+      }
+      const counts = (id: number, haveCount: number, wantCount: number) =>
+        db.update(releases).set({ haveCount, wantCount }).where(eq(releases.id, id)).run();
+      counts(1, 10, 50);
+      counts(2, 5000, 6000);
+      counts(3, 20, 10);
+      counts(4, 0, 4);
+
+      expect(titles((await get("/releases?haveMax=100")).body)).toEqual(["Nobody", "Rare", "Unwanted"]);
+      expect(titles((await get("/releases?haveMax=100&wantRatioMin=2")).body)).toEqual(["Nobody", "Rare"]);
+      expect(titles((await get("/releases?wantRatioMin=1.1")).body)).toEqual(["Common", "Nobody", "Rare"]);
+      expect(titles((await get("/releases?wantMin=40&haveMax=100")).body)).toEqual(["Rare"]);
+    });
+
     it("searches the title and the artist names: every word must match, in any case", async () => {
       seedRelease(1, "Selected Ambient Works", { artists: [{ id: 1, name: "Aphex Twin" }] });
       seedRelease(2, "Drukqs", { artists: [{ id: 1, name: "Aphex Twin" }] });
@@ -306,6 +323,9 @@ describe("GET /releases and /releases/filter-options", () => {
       ["pageSize=0", "pageSize must be a positive integer"],
       ["yearMin=abc", "yearMin must be an integer"],
       ["yearMax=1.5", "yearMax must be an integer"],
+      ["haveMax=-1", "haveMax must be a non-negative integer"],
+      ["wantMin=x", "wantMin must be a non-negative integer"],
+      ["wantRatioMin=0", "wantRatioMin must be a positive number"],
       ["sort=bogus", "sort must be one of"],
     ])("400s on %s", async (query, message) => {
       const res = await get(`/releases?${query}`);

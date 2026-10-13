@@ -9,7 +9,7 @@ import { discogsQueueJobs, discogsTokens, enrichmentRuns, releases } from "../db
 import { createReleaseDetailHandler } from "../indexing/release-detail-handler";
 import { DiscogsQueue, PACING_MS } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
-import { finishRunsWithNothingLeft, finishRunWhenSettled, startRun } from "./enrichment-run";
+import { finishRunsWithNothingLeft, finishRunWhenSettled, startHaveWantBackfill, startRun } from "./enrichment-run";
 
 describe("an enrichment run across a server restart", () => {
   let dbPath: string;
@@ -94,5 +94,25 @@ describe("an enrichment run across a server restart", () => {
     });
 
     expect(run().status).toBe("done");
+  });
+
+  it("backfills haves and wants only for enriched releases that lack them", async () => {
+    db.update(releases).set({ enrichedAt: new Date(1) }).where(eq(releases.id, 1)).run();
+    db.update(releases).set({ enrichedAt: new Date(1), haveCount: 5, wantCount: 2 }).where(eq(releases.id, 2)).run();
+
+    const started = startHaveWantBackfill(db, new DiscogsQueue(db), "u1");
+    expect("run" in started && started.run.total).toBe(1);
+
+    boot(
+      async (id) =>
+        ({ id, title: `R${id}`, artists: [], resource_url: "", community: { have: 120, want: 45 } }) as DiscogsRelease,
+    );
+    await vi.advanceTimersByTimeAsync(PACING_MS);
+
+    const byId = (id: number) => db.select().from(releases).where(eq(releases.id, id)).get()!;
+    expect(byId(1)).toMatchObject({ haveCount: 120, wantCount: 45 });
+    expect(byId(2)).toMatchObject({ haveCount: 5, wantCount: 2 });
+    expect(byId(3).haveCount).toBeNull();
+    expect(run()).toMatchObject({ status: "done", total: 1 });
   });
 });
