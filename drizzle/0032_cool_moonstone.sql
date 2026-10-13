@@ -1,0 +1,1 @@
+ALTER TABLE `user_settings` ADD `rarity_have_max` integer DEFAULT 1000 NOT NULL;
