@@ -294,7 +294,10 @@ paths:
         Queues one fetch per release the filter shows the user that is not
         faded, not already enriched (unless fresh) and not already queued by
         another run, at one request per 1.1 seconds on the user's own token.
-        Replaces the user's last finished run.
+        Replaces the user's last finished run. While the user has an active
+        run, the releases are added to it (behind the ones already queued) and
+        that run is returned with its total grown; it keeps the query it
+        started with.
       requestBody:
         required: true
         content:
@@ -316,8 +319,7 @@ paths:
                 $ref: "#/components/schemas/ErrorDto"
         "409":
           description: >
-            The user has no Discogs token (code token_required), or already has
-            an active run (code run_active). Nothing is queued.
+            The user has no Discogs token (code token_required). Nothing is queued.
           content:
             application/json:
               schema:
