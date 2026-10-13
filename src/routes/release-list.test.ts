@@ -9,7 +9,7 @@ import { eq, inArray } from "drizzle-orm";
 import { createDb, type Db } from "../db/client";
 import { rebuildFilterOptions } from "../db/filter-options";
 import { refreshVersionCounts } from "../db/version-counts";
-import { fades, releases } from "../db/schema";
+import { fades, releases, userSettings } from "../db/schema";
 import { DiscogsQueue } from "../queue/discogs-queue";
 import { createApp } from "../app";
 
@@ -220,6 +220,37 @@ describe("GET /releases and /releases/filter-options", () => {
 
       expect(titles((await get("/releases?sort=tracks")).body)).toEqual(["Two", "Five", "None"]);
       expect(titles((await get("/releases?sort=-tracks")).body)).toEqual(["Five", "Two", "None"]);
+    });
+
+    it("sorts by rarity: most wanted per have first, leaving the unranked last", async () => {
+      for (const [id, title] of [[1, "Rare"], [2, "Common"], [3, "Unwanted"], [4, "Nobody"], [5, "Never enriched"], [6, "Rarer"]] as const) {
+        seedRelease(id, title);
+      }
+      const counts = (id: number, haveCount: number, wantCount: number) =>
+        db.update(releases).set({ haveCount, wantCount }).where(eq(releases.id, id)).run();
+      counts(1, 10, 50); // 5
+      counts(2, 5000, 6000); // over the ceiling
+      counts(3, 20, 10); // 0.5
+      counts(4, 0, 4); // 4
+      counts(6, 20, 100); // 5, more wanted than Rare
+
+      const body = (await get("/releases?sort=-rarity")).body;
+      expect(titles(body)).toEqual(["Rarer", "Rare", "Nobody", "Unwanted", "Common", "Never enriched"]);
+
+      db.insert(userSettings).values({ uid: "test-uid", rarityHaveMax: 10, updatedAt: new Date() }).run();
+      expect(titles((await get("/releases?sort=-rarity")).body)).toEqual([
+        "Rare",
+        "Nobody",
+        // Over the ceiling: unranked, but still in ratio order among themselves.
+        "Rarer",
+        "Common",
+        "Unwanted",
+        "Never enriched",
+      ]);
+    });
+
+    it("has no ascending rarity sort", async () => {
+      expect((await get("/releases?sort=rarity")).status).toBe(400);
     });
 
     it("sorts by version count, counting the releases under the same master (1 without one)", async () => {

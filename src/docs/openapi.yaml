@@ -117,10 +117,14 @@ paths:
           schema: { type: string, maxLength: 200 }
         - name: sort
           in: query
+          description: >
+            -rarity ranks by wants per have (wants / max(haves, 1)), the most wanted first, and has no
+            ascending order. Releases with no haves and wants known, or with more haves than the
+            user's rarityHaveMax setting, come last.
           schema:
             type: string
             enum:
-              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks, versions, -versions]
+              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks, versions, -versions, -rarity]
             default: title
       responses:
         "200":
@@ -1144,12 +1148,18 @@ components:
 
     SettingsDto:
       type: object
-      required: [theme]
+      required: [theme, rarityHaveMax]
       properties:
         theme:
           type: string
           enum: [light, dark]
           description: The colour theme of the app. Dark until the user picks light.
+        rarityHaveMax:
+          type: integer
+          minimum: 1
+          description: >
+            The most haves a release can have and still be ranked by sort=-rarity. 1000 until the
+            user changes it.
 
     UpdateSettingsRequestDto:
       type: object
@@ -1158,6 +1168,9 @@ components:
         theme:
           type: string
           enum: [light, dark]
+        rarityHaveMax:
+          type: integer
+          minimum: 1
 
     FadedItemDto:
       type: object

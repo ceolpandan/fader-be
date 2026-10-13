@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { Router } from "express";
 import type { Db } from "../db/client";
-import { DEFAULT_THEME, THEMES, userSettings } from "../db/schema";
+import { DEFAULT_RARITY_HAVE_MAX, DEFAULT_THEME, THEMES, userSettings } from "../db/schema";
 import type {
   SettingsDto,
   UpdateSettingsRequestDto,
@@ -9,6 +9,16 @@ import type {
 
 export interface SettingsRouterDeps {
   db: Db;
+}
+
+/** The user's rarity ceiling, or the default when they never changed it. */
+export function rarityHaveMaxOf(db: Db, uid: string): number {
+  const row = db
+    .select({ rarityHaveMax: userSettings.rarityHaveMax })
+    .from(userSettings)
+    .where(eq(userSettings.uid, uid))
+    .get();
+  return row?.rarityHaveMax ?? DEFAULT_RARITY_HAVE_MAX;
 }
 
 export function createSettingsRouter(deps: SettingsRouterDeps): Router {
@@ -20,7 +30,10 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
       .from(userSettings)
       .where(eq(userSettings.uid, uid))
       .get();
-    return { theme: row?.theme ?? DEFAULT_THEME };
+    return {
+      theme: row?.theme ?? DEFAULT_THEME,
+      rarityHaveMax: rarityHaveMaxOf(deps.db, uid),
+    };
   }
 
   router.get("/", (req, res) => {
@@ -39,20 +52,30 @@ export function createSettingsRouter(deps: SettingsRouterDeps): Router {
         .json({ error: `theme must be one of: ${THEMES.join(", ")}` });
       return;
     }
+    if (
+      body.rarityHaveMax !== undefined &&
+      !(Number.isInteger(body.rarityHaveMax) && (body.rarityHaveMax as number) >= 1)
+    ) {
+      res.status(400).json({ error: "rarityHaveMax must be a positive integer" });
+      return;
+    }
 
     const next: SettingsDto = {
       ...settingsOf(uid),
       ...(body.theme !== undefined && {
         theme: body.theme as SettingsDto["theme"],
       }),
+      ...(body.rarityHaveMax !== undefined && {
+        rarityHaveMax: body.rarityHaveMax as number,
+      }),
     };
     const updatedAt = new Date();
     deps.db
       .insert(userSettings)
-      .values({ uid, theme: next.theme, updatedAt })
+      .values({ uid, theme: next.theme, rarityHaveMax: next.rarityHaveMax, updatedAt })
       .onConflictDoUpdate({
         target: userSettings.uid,
-        set: { theme: next.theme, updatedAt },
+        set: { theme: next.theme, rarityHaveMax: next.rarityHaveMax, updatedAt },
       })
       .run();
 

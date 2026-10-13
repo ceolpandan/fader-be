@@ -225,6 +225,13 @@
       "when": 1791907827480,
       "tag": "0031_release_have_count_index",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1791909416494,
+      "tag": "0032_cool_moonstone",
+      "breakpoints": true
     }
   ]
 }

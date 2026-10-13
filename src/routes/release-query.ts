@@ -1,10 +1,11 @@
 import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import type { Request } from "express";
-import { releaseFormats, releaseGenres, releaseStyles, releases } from "../db/schema";
+import { DEFAULT_RARITY_HAVE_MAX, releaseFormats, releaseGenres, releaseStyles, releases } from "../db/schema";
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks", "versions"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
-const SORT_OPTIONS = SORT_FIELDS.flatMap((field) => [field, `-${field}`]) as string[];
+// Rarity only has a descending order: the rarest releases first.
+const SORT_OPTIONS = [...SORT_FIELDS.flatMap((field) => [field, `-${field}`]), "-rarity"] as string[];
 
 function parseCommaSeparated(value: unknown): string[] {
   if (typeof value !== "string" || value.length === 0) return [];
@@ -160,7 +161,11 @@ function parseOptionalRatio(value: unknown, name: string): { value?: number; err
 }
 
 /** Reads `page`, `pageSize`, the filters and `sort` from the query string; `error` is the 400 message. */
-export function parseReleaseQuery(req: Pick<Request, "query">): { query: ReleaseQuery } | { error: string } {
+export function parseReleaseQuery(
+  req: Pick<Request, "query">,
+  /** The user's rarity ceiling: releases with more haves are unranked by `sort=-rarity`. */
+  rarityHaveMax = DEFAULT_RARITY_HAVE_MAX,
+): { query: ReleaseQuery } | { error: string } {
   const page = Number(req.query.page ?? 1);
   const pageSize = Number(req.query.pageSize ?? 50);
   if (!Number.isInteger(page) || page < 1) return { error: "page must be a positive integer" };
@@ -183,7 +188,7 @@ export function parseReleaseQuery(req: Pick<Request, "query">): { query: Release
     return { error: `sort must be one of ${SORT_OPTIONS.join(", ")}` };
   }
   const isDescending = sortParam.startsWith("-");
-  const sortField = (isDescending ? sortParam.slice(1) : sortParam) as SortField;
+  const sortField = (isDescending ? sortParam.slice(1) : sortParam) as SortField | "rarity";
 
   const genre = parseCommaSeparated(req.query.genre);
   const style = parseCommaSeparated(req.query.style);
@@ -238,6 +243,15 @@ export function parseReleaseQuery(req: Pick<Request, "query">): { query: Release
 
   const combinations = parseStyleCombinations(req.query.styleCombo);
   const styleCombinations = combinations.length > 0 ? styleCombinationsFilter(combinations) : null;
+
+  if (sortField === "rarity") {
+    // Wants per have, a release nobody has counting as one have. Releases without counts, or with
+    // more haves than the ceiling, have no rank and go last; ties go to the one more wanted.
+    const unranked = sql`(${releases.haveCount} IS NULL OR ${releases.wantCount} IS NULL OR ${releases.haveCount} > ${rarityHaveMax})`;
+    const ratio = sql`${releases.wantCount} * 1.0 / MAX(${releases.haveCount}, 1)`;
+    const orderBy = [unranked, sql`${ratio} DESC`, desc(releases.wantCount), asc(releases.title), sql`${releases.id}`];
+    return { query: { page, pageSize, filters, styleCombinations, orderBy } };
+  }
 
   const orderExpr = sortColumn(sortField);
   // Releases never enriched have no rating, and one with no tracklist has no known track count: both go last.

@@ -17,6 +17,7 @@ import {
 } from "../queue/discogs-queue";
 import { logger } from "../util/logger";
 import { parseReleaseQuery } from "./release-query";
+import { rarityHaveMaxOf } from "./settings";
 
 export interface ReleasesRouterDeps {
   db: Db;
@@ -64,7 +65,7 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
 
   router.get("/", (req, res) => {
     const { uid } = req.user!;
-    const parsed = parseReleaseQuery(req);
+    const parsed = parseReleaseQuery(req, rarityHaveMaxOf(deps.db, uid));
     if ("error" in parsed) {
       res.status(400).json({ error: parsed.error });
       return;

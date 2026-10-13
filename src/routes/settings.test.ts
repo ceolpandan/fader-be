@@ -65,7 +65,7 @@ describe("settings", () => {
       const res = await asUser(app, "u1").get("/settings");
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ theme: "dark" });
+      expect(res.body).toEqual({ theme: "dark", rarityHaveMax: 1000 });
       expect(db.select().from(userSettings).all()).toEqual([]);
     });
 
@@ -80,7 +80,7 @@ describe("settings", () => {
 
       const res = await asUser(app, "u2").get("/settings");
 
-      expect(res.body).toEqual({ theme: "dark" });
+      expect(res.body).toEqual({ theme: "dark", rarityHaveMax: 1000 });
     });
   });
 
@@ -89,9 +89,9 @@ describe("settings", () => {
       const res = await asUser(app, "u1").patch("/settings").send({ theme: "light" });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ theme: "light" });
+      expect(res.body).toEqual({ theme: "light", rarityHaveMax: 1000 });
       expect(db.select().from(userSettings).all()).toMatchObject([{ uid: "u1", theme: "light" }]);
-      expect((await asUser(app, "u1").get("/settings")).body).toEqual({ theme: "light" });
+      expect((await asUser(app, "u1").get("/settings")).body).toEqual({ theme: "light", rarityHaveMax: 1000 });
     });
 
     it("changes the stored theme without adding a second row", async () => {
@@ -107,7 +107,7 @@ describe("settings", () => {
       const res = await asUser(app, "u1").patch("/settings").send({});
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ theme: "light" });
+      expect(res.body).toEqual({ theme: "light", rarityHaveMax: 1000 });
     });
 
     it.each([["sepia"], [""], [null], [1]])("rejects the theme %j", async (theme) => {
@@ -118,11 +118,27 @@ describe("settings", () => {
       expect(db.select().from(userSettings).all()).toEqual([]);
     });
 
+    it("stores the rarity ceiling next to the theme", async () => {
+      const res = await asUser(app, "u1").patch("/settings").send({ rarityHaveMax: 250 });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ theme: "dark", rarityHaveMax: 250 });
+      expect((await asUser(app, "u1").get("/settings")).body).toEqual({ theme: "dark", rarityHaveMax: 250 });
+    });
+
+    it.each([[0], [-5], [1.5], ["10"], [null]])("rejects the rarity ceiling %j", async (rarityHaveMax) => {
+      const res = await asUser(app, "u1").patch("/settings").send({ rarityHaveMax });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "rarityHaveMax must be a positive integer" });
+      expect(db.select().from(userSettings).all()).toEqual([]);
+    });
+
     it("keeps one user's change away from another's", async () => {
       await asUser(app, "u1").patch("/settings").send({ theme: "light" });
       await asUser(app, "u2").patch("/settings").send({ theme: "dark" });
 
-      expect((await asUser(app, "u1").get("/settings")).body).toEqual({ theme: "light" });
+      expect((await asUser(app, "u1").get("/settings")).body).toEqual({ theme: "light", rarityHaveMax: 1000 });
       expect(db.select().from(userSettings).all()).toHaveLength(2);
     });
   });

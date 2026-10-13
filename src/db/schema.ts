@@ -188,11 +188,14 @@ export type FadeKind = "master" | "release";
 export const THEMES = ["light", "dark"] as const;
 export type Theme = (typeof THEMES)[number];
 export const DEFAULT_THEME: Theme = "dark";
+/** Releases with more haves than this are not rare: the rarity sort ranks them last. */
+export const DEFAULT_RARITY_HAVE_MAX = 1000;
 
 /** A user's settings, one row per user once they change any; a missing row means the defaults. */
 export const userSettings = sqliteTable("user_settings", {
   uid: text("uid").primaryKey(),
   theme: text("theme").$type<Theme>().notNull().default(DEFAULT_THEME),
+  rarityHaveMax: integer("rarity_have_max").notNull().default(DEFAULT_RARITY_HAVE_MAX),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
