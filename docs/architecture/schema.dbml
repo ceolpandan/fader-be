@@ -1,0 +1,184 @@
+table releases {
+  id integer [pk, not null]
+  title text [not null]
+  year integer
+  country text
+  genres text [not null]
+  styles text [not null]
+  formats text [not null]
+  master_id integer
+  labels text [not null, default: `[]`]
+  artists text [not null]
+  tracklist text [not null, default: `[]`]
+  videos text [not null, default: `[]`]
+  rating_average real
+  rating_count integer
+  have_count integer
+  want_count integer
+  enriched_at integer
+  missing_at integer
+  version_count integer [not null, default: 1]
+  track_count integer
+  artist_sort text
+  format_sort text
+
+  indexes {
+    master_id [name: 'releases_master_id_idx']
+    (title, id) [name: 'releases_title_idx']
+    (year, id) [name: 'releases_year_idx']
+    (artist_sort, id) [name: 'releases_artist_sort_idx']
+    (format_sort, id) [name: 'releases_format_sort_idx']
+    (track_count, track_count, id) [name: 'releases_track_count_idx']
+    (country, id) [name: 'releases_country_idx']
+    (version_count, id) [name: 'releases_version_count_idx']
+    (rating_average, rating_average, id) [name: 'releases_rating_idx']
+    (have_count, id) [name: 'releases_have_count_idx']
+  }
+}
+
+table release_genres {
+  release_id integer [not null]
+  genre text [not null]
+
+  indexes {
+    (genre, release_id) [name: 'release_genres_genre_idx', unique]
+    (release_id, genre) [name: 'release_genres_release_idx']
+  }
+}
+
+table release_styles {
+  release_id integer [not null]
+  style text [not null]
+
+  indexes {
+    (style, release_id) [name: 'release_styles_style_idx', unique]
+    (release_id, style) [name: 'release_styles_release_idx']
+  }
+}
+
+table release_formats {
+  release_id integer [not null]
+  format text [not null]
+
+  indexes {
+    (format, release_id) [name: 'release_formats_format_idx', unique]
+    (release_id, format) [name: 'release_formats_release_idx']
+  }
+}
+
+table filter_options {
+  kind text [not null]
+  value text [not null]
+  position integer [not null]
+
+  indexes {
+    (kind, value) [pk]
+  }
+}
+
+table discogs_queue_jobs {
+  id integer [pk, not null, increment]
+  uid text [not null, default: '']
+  run_id text [not null]
+  type text [not null]
+  payload text [not null]
+  status text [not null, default: 'pending']
+  priority integer [not null, default: 0]
+  attempts integer [not null, default: 0]
+  error_message text
+  created_at integer [not null]
+  updated_at integer [not null]
+}
+
+table user_settings {
+  uid text [pk, not null]
+  theme text [not null, default: 'dark']
+  rarity_have_max integer [not null, default: 1000]
+  updated_at integer [not null]
+}
+
+table saved_filters {
+  id integer [pk, not null, increment]
+  uid text [not null]
+  name text [not null]
+  query text [not null]
+  created_at integer [not null]
+
+  indexes {
+    (uid, query) [name: 'saved_filters_uid_query_idx', unique]
+  }
+}
+
+table discogs_tokens {
+  uid text [pk, not null]
+  token_encrypted text [not null]
+  username text [not null]
+  created_at integer [not null]
+}
+
+table discogs_profiles {
+  uid text [pk, not null]
+  username text [not null]
+  collection_count integer [not null]
+  wantlist_count integer [not null]
+  fetched_at integer [not null]
+}
+
+table fades {
+  uid text [not null]
+  kind text [not null]
+  id integer [not null]
+  created_at integer [not null]
+  lookup_status text [not null, default: 'done']
+  title text
+  artists text
+
+  indexes {
+    (uid, kind, id) [pk]
+  }
+}
+
+table master_versions {
+  master_id integer [not null]
+  release_id integer [not null]
+
+  indexes {
+    (master_id, release_id) [pk]
+    release_id [name: 'master_versions_release_idx']
+  }
+}
+
+table enrichment_runs {
+  id text [pk, not null]
+  uid text [not null]
+  query text [not null]
+  fresh integer [not null]
+  status text [not null]
+  total integer [not null]
+  skipped integer [not null]
+  error_message text
+  started_at integer [not null]
+  finished_at integer
+}
+
+table enrichment_not_found {
+  run_id text [not null]
+  release_id integer [not null]
+
+  indexes {
+    (run_id, release_id) [pk]
+  }
+}
+// Logical relations (not enforced by SQLite). releases.master_id has no Ref: it is nullable and
+// master_versions.master_id is only half of a composite key, so DBML cannot express it.
+Ref: release_genres.release_id > releases.id
+Ref: release_styles.release_id > releases.id
+Ref: release_formats.release_id > releases.id
+Ref: master_versions.release_id > releases.id
+Ref: enrichment_not_found.run_id > enrichment_runs.id
+Ref: discogs_queue_jobs.run_id > enrichment_runs.id
+Ref: enrichment_runs.uid > discogs_tokens.uid
+Ref: discogs_profiles.uid - discogs_tokens.uid
+Ref: user_settings.uid - discogs_tokens.uid
+Ref: saved_filters.uid > discogs_tokens.uid
+Ref: fades.uid > discogs_tokens.uid
