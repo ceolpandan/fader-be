@@ -169,6 +169,37 @@ table enrichment_not_found {
     (run_id, release_id) [pk]
   }
 }
+
+table scrapes {
+  id integer [pk, not null, increment]
+  uid text [not null]
+  name text [not null]
+  created_at integer [not null]
+
+  indexes {
+    (uid, name) [name: 'scrapes_uid_name_idx', unique]
+  }
+}
+
+table scrape_releases {
+  scrape_id integer [not null]
+  release_id integer [not null]
+
+  indexes {
+    (scrape_id, release_id) [pk]
+    release_id [name: 'scrape_releases_release_idx']
+  }
+}
+
+table scrape_unmatched {
+  scrape_id integer [not null]
+  position integer [not null]
+  line text [not null]
+
+  indexes {
+    (scrape_id, position) [pk]
+  }
+}
 // Logical relations (not enforced by SQLite). releases.master_id has no Ref: it is nullable and
 // master_versions.master_id is only half of a composite key, so DBML cannot express it.
 Ref: release_genres.release_id > releases.id

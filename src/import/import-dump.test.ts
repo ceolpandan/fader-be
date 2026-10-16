@@ -113,7 +113,7 @@ describe("importDump", () => {
     expect(stats.kept).toBe(3);
   });
 
-  it("carries over fades, user settings, saved filters, tokens and releases from the old database", async () => {
+  it("carries over fades, user settings, saved filters, scrapes, tokens and releases from the old database", async () => {
     await importDump({ dumpPath: path.join(dir, "releases.xml"), outPath: path.join(dir, "old.sqlite") });
     const old = new Database(path.join(dir, "old.sqlite"));
     old.exec(`
@@ -121,6 +121,9 @@ describe("importDump", () => {
       INSERT INTO saved_filters (id, uid, name, query, created_at) VALUES (7, 'u1', 'Dub', 'tracks=2&sort=-year', 300);
       INSERT INTO fades (uid, kind, id, created_at, lookup_status, title) VALUES ('u1', 'master', 1660109, 100, 'done', 'Stockholm');
       INSERT INTO user_settings (uid, theme, updated_at) VALUES ('u1', 'light', 200);
+      INSERT INTO scrapes (id, uid, name, created_at) VALUES (3, 'u1', 'Disk Frisk', 500);
+      INSERT INTO scrape_releases (scrape_id, release_id) VALUES (3, 99);
+      INSERT INTO scrape_unmatched (scrape_id, position, line) VALUES (3, 4, 'Nobody - Nothing');
       INSERT INTO releases (id, title, genres, styles, formats, artists) VALUES (99, 'Old only', '["Electronic"]', '[]', '[]', '[]');
     `);
     old.close();
@@ -142,6 +145,11 @@ describe("importDump", () => {
     ]);
     expect(db.prepare("SELECT uid, token_encrypted FROM discogs_tokens").all()).toEqual([{ uid: "u1", token_encrypted: "v1.a.b.c" }]);
     expect(db.prepare("SELECT count(*) c FROM releases WHERE id = 99").get()).toEqual({ c: 1 });
+    expect(db.prepare("SELECT id, uid, name FROM scrapes").all()).toEqual([{ id: 3, uid: "u1", name: "Disk Frisk" }]);
+    expect(db.prepare("SELECT scrape_id, release_id FROM scrape_releases").all()).toEqual([{ scrape_id: 3, release_id: 99 }]);
+    expect(db.prepare("SELECT scrape_id, position, line FROM scrape_unmatched").all()).toEqual([
+      { scrape_id: 3, position: 4, line: "Nobody - Nothing" },
+    ]);
     db.close();
   });
 

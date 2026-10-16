@@ -232,6 +232,13 @@
       "when": 1791909416494,
       "tag": "0032_cool_moonstone",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1792097205850,
+      "tag": "0033_remarkable_vindicator",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import type { Db } from "../db/client";
 import { isNotFadedFor } from "../db/fades";
 import { isNotMissing } from "../db/missing";
 import {
+  DEFAULT_RARITY_HAVE_MAX,
   discogsQueueJobs,
   enrichmentNotFound,
   enrichmentRuns,
@@ -62,7 +63,7 @@ interface Scope {
 }
 
 function scopeOf(db: Db, uid: string, query: string, fresh: boolean): Scope | RunScopeError {
-  const parsed = parseReleaseQuery({ query: queryObject(query) });
+  const parsed = parseReleaseQuery({ query: queryObject(query) }, DEFAULT_RARITY_HAVE_MAX, uid);
   if ("error" in parsed) return parsed;
   const { filters, styleCombinations } = parsed.query;
 

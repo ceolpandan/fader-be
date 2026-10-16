@@ -301,3 +301,42 @@ export const enrichmentNotFound = sqliteTable(
   { runId: text("run_id").notNull(), releaseId: integer("release_id").notNull() },
   (table) => [primaryKey({ columns: [table.runId, table.releaseId] })],
 );
+
+/**
+ * A list of `Artist - Title` lines a collector uploaded (a shop's stock, say), matched against the
+ * catalogue. The name is the collector's own and unique among theirs; Explore filters by the id.
+ */
+export const scrapes = sqliteTable(
+  "scrapes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    uid: text("uid").notNull(),
+    name: text("name").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("scrapes_uid_name_idx").on(table.uid, table.name)],
+);
+
+/** The releases a scrape's lines matched; a line that fits several pressings has a row for each. */
+export const scrapeReleases = sqliteTable(
+  "scrape_releases",
+  {
+    scrapeId: integer("scrape_id").notNull(),
+    releaseId: integer("release_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.scrapeId, table.releaseId] }),
+    index("scrape_releases_release_idx").on(table.releaseId),
+  ],
+);
+
+/** The lines of a scrape that matched no release, as uploaded and in file order. */
+export const scrapeUnmatched = sqliteTable(
+  "scrape_unmatched",
+  {
+    scrapeId: integer("scrape_id").notNull(),
+    position: integer("position").notNull(),
+    line: text("line").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.scrapeId, table.position] })],
+);

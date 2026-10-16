@@ -1,6 +1,13 @@
 import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import type { Request } from "express";
-import { DEFAULT_RARITY_HAVE_MAX, releaseFormats, releaseGenres, releaseStyles, releases } from "../db/schema";
+import {
+  releaseFormats,
+  releaseGenres,
+  releaseStyles,
+  releases,
+  scrapeReleases,
+  scrapes,
+} from "../db/schema";
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks", "versions"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
@@ -108,7 +115,12 @@ function searchFilter(text: string): SQL {
   return sql`(${sql.join(each, sql` AND `)})`;
 }
 
-const TRACK_COUNT_OPTIONS = ["1", "2", "3", "4", "5", "6", "7+"];
+/** The release is one the collector's own scrape matched; another collector's scrape matches nothing. */
+function scrapeFilter(scrapeId: number, uid: string): SQL {
+  return sql`EXISTS (SELECT 1 FROM ${scrapeReleases} JOIN ${scrapes} ON ${scrapes.id} = ${scrapeReleases.scrapeId} WHERE ${scrapeReleases.releaseId} = ${releases.id} AND ${scrapeReleases.scrapeId} = ${scrapeId} AND ${scrapes.uid} = ${uid})`;
+}
+
+const TRACK_COUNT_OPTIONS =["1", "2", "3", "4", "5", "6", "7+"];
 
 /** The tracklist length is one of the counts; "7+" stands for seven or more. */
 function trackCountFilter(values: string[]): SQL {
@@ -182,7 +194,9 @@ function parseOptionalRating(value: unknown, name: string): { value?: number; er
 export function parseReleaseQuery(
   req: Pick<Request, "query">,
   /** The user's rarity ceiling: releases with more haves are unranked by `sort=-rarity`. */
-  rarityHaveMax = DEFAULT_RARITY_HAVE_MAX,
+  rarityHaveMax: number,
+  /** Whose scrapes the `scrape` filter may name. */
+  uid: string,
 ): { query: ReleaseQuery } | { error: string } {
   const page = Number(req.query.page ?? 1);
   const pageSize = Number(req.query.pageSize ?? 50);
@@ -233,11 +247,15 @@ export function parseReleaseQuery(
     return { error: "noLinks must be one of only, exclude" };
   }
 
+  const scrape = parseOptionalInt(req.query.scrape, "scrape");
+  if (scrape.error) return { error: scrape.error };
+
   const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (search.length > MAX_SEARCH_LENGTH) return { error: `q must be at most ${MAX_SEARCH_LENGTH} characters` };
 
   const filters: SQL[] = [];
   if (search.length > 0) filters.push(searchFilter(search));
+  if (scrape.value !== undefined) filters.push(scrapeFilter(scrape.value, uid));
   if (genre.length > 0) filters.push(hasAny("genre", genre));
   if (style.length > 0) filters.push(hasAny("style", style));
   if (format.length > 0) filters.push(hasAny("format", format));

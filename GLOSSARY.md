@@ -76,6 +76,10 @@ _Avoid_: Restore, unhide
 A filter a collector kept on Explore: a name and the Explore URL query (without the page, sort kept). Per collector, unique on the query, no cap. Stored in `saved_filters` and carried over by the dump import, like fades.
 _Avoid_: Preset, bookmark
 
+**Scrape**:
+A named list of `Artist - Title` lines a collector uploaded (a shop's stock, say), matched to releases when both the artist and the title are the same after ignoring case, accents and punctuation. A line that fits several pressings takes all of them; a line that matches nothing is kept as unmatched. Per collector, unique on the name; Explore filters by it and shows the unmatched lines. The matched releases are shared catalogue rows, so enriching them benefits every collector. Stored in `scrapes`, `scrape_releases` and `scrape_unmatched`, and carried over by the dump import.
+_Avoid_: Import, upload (for the list itself), wishlist
+
 **Collector**:
 A person using Fader to browse releases. Each collector has their own fades.
 _Avoid_: User, customer
