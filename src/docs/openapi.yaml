@@ -129,6 +129,12 @@ paths:
             Search text, at most 200 characters. Every word must be in the title
             or in one of the artist names, in any case.
           schema: { type: string, maxLength: 200 }
+        - name: scrape
+          in: query
+          description: >
+            Only releases one of the user's own scrapes matched, by scrape id. A scrape that does
+            not exist, or belongs to another user, matches nothing.
+          schema: { type: integer }
         - name: sort
           in: query
           description: >
@@ -566,6 +572,204 @@ paths:
           description: Deleted
         "404":
           description: No such saved filter for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes:
+    get:
+      operationId: listScrapes
+      summary: The signed-in user's scrapes
+      description: In the order they were uploaded, oldest first.
+      responses:
+        "200":
+          description: Scrapes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ScrapeDto" }
+    post:
+      operationId: createScrape
+      summary: Upload a scrape
+      description: >
+        Takes a named list of `Artist - Title` lines (one per line, split on the first " - ") and
+        matches each line to the releases whose artist and title are the same after ignoring case,
+        accents, punctuation, "&" versus "and", a leading "The" and a Discogs disambiguation
+        number. A line that fits several pressings takes all of them. The answer comes when the
+        matching is done, which takes several seconds. Blank lines and repeated lines are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScrapeRequestDto"
+      responses:
+        "201":
+          description: The scrape, with what it matched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeDto"
+        "400":
+          description: The name is empty or too long, or the text is missing, empty, over 512 KB or over 5000 distinct lines
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: The user already has a scrape with this name; nothing is created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes/{id}:
+    patch:
+      operationId: renameScrape
+      summary: Rename a scrape
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameScrapeRequestDto"
+      responses:
+        "200":
+          description: The scrape after the rename
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeDto"
+        "400":
+          description: The name is empty or too long
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: No such scrape for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: The user already has another scrape with this name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+    delete:
+      operationId: deleteScrape
+      summary: Delete a scrape
+      description: Removes the scrape with its matches and unmatched lines; the releases stay.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: No such scrape for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes/{id}/unmatched:
+    get:
+      operationId: getScrapeUnmatched
+      summary: The lines of a scrape that matched no release
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The unmatched lines (those not matched or attached by hand), as uploaded and in file order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeUnmatchedDto"
+        "404":
+          description: No such scrape for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes/{id}/unmatched/{position}/attach:
+    post:
+      operationId: attachScrapeRelease
+      summary: Attach a release to an unmatched line by hand
+      description: >
+        The line leaves the unmatched list and the release joins the scrape's releases (a release
+        the scrape already holds is not added twice). A release the catalogue lacks, or has flagged
+        missing (Discogs no longer had it), is first fetched from Discogs, ahead of any queued run and with the user's own token, and stored; if Discogs
+        has no such release, nothing is stored and the line stays unmatched. The answer comes when
+        that fetch is done.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: position
+          required: true
+          description: The line's position, as the unmatched list gives it.
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachReleaseRequestDto"
+      responses:
+        "200":
+          description: The scrape with its new counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeDto"
+        "400":
+          description: releaseId is not a positive integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: >
+            No such scrape for this user, no such unmatched line, or (code release_not_found)
+            Discogs has no such release
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: The release is not in the catalogue and the user has no Discogs token, or Discogs rejected it (code token_required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Fetching the release from Discogs failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is unavailable and retrying; try again later
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "504":
+          description: Timed out waiting for Discogs; the fetch is still queued
           content:
             application/json:
               schema:
@@ -1051,6 +1255,67 @@ components:
           type: string
           maxLength: 200
           description: Trimmed; must not be empty.
+
+    ScrapeDto:
+      type: object
+      required: [id, name, createdAt, releaseCount, unmatchedCount]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        releaseCount:
+          type: integer
+          description: Distinct releases the lines matched.
+        unmatchedCount:
+          type: integer
+          description: Lines that matched no release.
+
+    CreateScrapeRequestDto:
+      type: object
+      required: [name, text]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          description: Trimmed; must not be empty and must not be one of the user's scrape names.
+        text:
+          type: string
+          description: The file's text, at most 512 KB; one "Artist - Title" per line, at most 5000 distinct lines.
+
+    RenameScrapeRequestDto:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          description: Trimmed; must not be empty.
+
+    ScrapeUnmatchedDto:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/ScrapeUnmatchedLineDto" }
+
+    ScrapeUnmatchedLineDto:
+      type: object
+      required: [position, line]
+      properties:
+        position:
+          type: integer
+          description: The line's place in the upload; it names the line when attaching a release to it.
+        line: { type: string }
+
+    AttachReleaseRequestDto:
+      type: object
+      required: [releaseId]
+      properties:
+        releaseId:
+          type: integer
+          minimum: 1
+          description: The Discogs release id; it must already be in the catalogue.
 
     EnrichmentPreviewDto:
       type: object

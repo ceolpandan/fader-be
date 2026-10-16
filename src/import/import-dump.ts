@@ -20,7 +20,7 @@ export interface ImportOptions {
   genre?: string;
   /** Read only evenly spaced chunks of the file (plain `.xml` only), for a sample database. */
   sample?: { chunks: number; chunkBytes: number };
-  /** An existing database to carry the fades, user settings, saved filters and Discogs tokens over from. */
+  /** An existing database to carry the fades, user settings, saved filters, scrapes and Discogs tokens over from. */
   carryOverFrom?: string;
   migrationsFolder?: string;
   log?: (message: string) => void;
@@ -45,7 +45,7 @@ const READ_BYTES = 8 * 1024 * 1024;
  * Builds a new database from the Discogs releases dump: the migrations, then the old database's
  * releases (when carrying over), then every dump release with the genre that is not there yet
  * (existing rows always win), then the indexes (built after the load, which is much faster). Only the fades, user
- * settings, saved filters and Discogs tokens are carried over from `carryOverFrom`. Swap the file in by pointing `DB_PATH` at
+ * settings, saved filters, scrapes and Discogs tokens are carried over from `carryOverFrom`. Swap the file in by pointing `DB_PATH` at
  * it with the API stopped.
  */
 export async function importDump(options: ImportOptions): Promise<ImportStats> {
@@ -174,12 +174,15 @@ function carryOverReleases(target: Database.Database, oldPath: string): number {
   }
 }
 
-/** Copies `fades`, `user_settings`, `saved_filters` and `discogs_tokens`, by the columns both databases have. Returns the fades copied. */
+/** The per-collector tables a re-import keeps; scrapes point at release ids, which carry over with the releases. */
+const CARRIED_TABLES = ["fades", "user_settings", "saved_filters", "discogs_tokens", "scrapes", "scrape_releases", "scrape_unmatched"];
+
+/** Copies `CARRIED_TABLES`, by the columns both databases have. Returns the fades copied. */
 function carryOver(target: Database.Database, oldPath: string): number {
   target.prepare("ATTACH DATABASE ? AS old").run(oldPath);
   try {
     let fades = 0;
-    for (const table of ["fades", "user_settings", "saved_filters", "discogs_tokens"]) {
+    for (const table of CARRIED_TABLES) {
       const columns = (schema: string) =>
         (target.prepare(`PRAGMA ${schema}.table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
       const inOld = columns("old");

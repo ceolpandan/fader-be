@@ -15,6 +15,7 @@ import { createFadeRouter } from "./routes/fade";
 import { createMastersRouter } from "./routes/masters";
 import { createReleasesRouter } from "./routes/releases";
 import { createSavedFiltersRouter } from "./routes/saved-filters";
+import { createScrapesRouter } from "./routes/scrapes";
 import { createSettingsRouter } from "./routes/settings";
 import { logger } from "./util/logger";
 
@@ -35,7 +36,8 @@ export function createApp(deps: AppDeps): Express {
 
   app.use(cors({ origin: "http://localhost:4200" }));
   app.use(requestLogger);
-  app.use(express.json());
+  // An uploaded scrape is up to 512 KB of text, above the default 100 KB limit.
+  app.use(express.json({ limit: "1mb" }));
 
   app.get("/docs-json", (_req, res) => {
     res.json(openapiSpec);
@@ -53,6 +55,7 @@ export function createApp(deps: AppDeps): Express {
   app.use("/enrichment", createEnrichmentRouter(deps));
   app.use("/fade", createFadeRouter(deps));
   app.use("/saved-filters", createSavedFiltersRouter(deps));
+  app.use("/scrapes", createScrapesRouter(deps));
   app.use("/me/discogs-profile", createDiscogsProfileRouter(deps));
   app.use("/settings/discogs-token", createDiscogsTokenRouter(deps));
   app.use("/settings", createSettingsRouter(deps));
