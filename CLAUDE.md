@@ -2,10 +2,6 @@
 
 Express + SQLite (Drizzle) API that serves Discogs releases and fades to `fader-ui` (sibling repo at `../fader-ui`) and the Discogs Fader extension. Commands and layout: `README.md`.
 
-## Discogs terms of use
-
-To comply with the Discogs API terms of use, there are no seller, inventory or listing endpoints, code or stored data. Read `docs/adr/0005-no-seller-features.md` before adding anything that touches seller, inventory, listing or price data, and do not restore such features from git history. `../fader-ui` follows the same rule; `fader-fe` is unchanged. Migration `0017` drops the seller tables irreversibly: back up the database file before running `npm run db:migrate` against data you want to keep.
-
 ## Issue tracker
 
 GitHub issues, all filed in `fader-ui` (even backend work). Reference them as `fader-ui#<n>` in commits.

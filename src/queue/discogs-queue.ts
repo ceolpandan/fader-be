@@ -10,6 +10,11 @@ export const MAX_ATTEMPTS = 3;
 export const INLINE_PRIORITY = 10;
 /** Priority of a Discogs search for a scrape line: ahead of background enrichment (0), behind inline requests. */
 export const SEARCH_PRIORITY = 5;
+/**
+ * Priority of a collector's Discogs sync and of the master fade lookups it queues: ahead of
+ * background enrichment (0), behind inline requests (a fade a person is waiting on).
+ */
+export const SYNC_PRIORITY = 5;
 export const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 export const BASE_BACKOFF_MS = 2000;
 /** The first pause after a transient Discogs error; each further failure in a row doubles it. */

@@ -246,6 +246,20 @@
       "when": 1792151629260,
       "tag": "0034_handy_puck",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1792240512077,
+      "tag": "0035_needy_jubilee",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1792242412052,
+      "tag": "0036_breezy_cloak",
+      "breakpoints": true
     }
   ]
 }

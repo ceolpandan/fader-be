@@ -80,6 +80,37 @@ describe("release_detail handler", () => {
     expect(row().enrichedAt).toBeInstanceOf(Date);
   });
 
+  it("stores the number for sale and when it was fetched", async () => {
+    getRelease.mockResolvedValue(discogsRelease({ num_for_sale: 7 }));
+
+    await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+    expect(row().numForSale).toBe(7);
+    expect(row().numForSaleAt).toEqual(row().enrichedAt);
+  });
+
+  it("stores no count, but still when it was fetched, for a release Discogs sent none for", async () => {
+    db.update(releases).set({ numForSale: 3 }).where(eq(releases.id, 1)).run();
+    getRelease.mockResolvedValue(discogsRelease());
+
+    await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+    expect(row().numForSale).toBeNull();
+    expect(row().numForSaleAt).toBeInstanceOf(Date);
+  });
+
+  it("inserts the full row for a release that is not stored, off any enrichment run", async () => {
+    getRelease.mockResolvedValue(discogsRelease({ id: 9, num_for_sale: 0 }));
+
+    await handler()({ uid: "u1", releaseId: 9 }, { runId: "wantlist-availability:u1", jobId: 1 });
+
+    expect(db.select().from(releases).where(eq(releases.id, 9)).get()).toMatchObject({
+      title: "New title",
+      numForSale: 0,
+      artists: [{ id: 7, name: "Band" }],
+    });
+  });
+
   it("stores a null rating for a release nobody rated", async () => {
     getRelease.mockResolvedValue(discogsRelease({ community: {} }));
 

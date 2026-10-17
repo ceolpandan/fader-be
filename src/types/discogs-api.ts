@@ -145,6 +145,35 @@ export interface DiscogsPagination {
   items: number;
 }
 
+/**
+ * One item of the owner's wantlist or collection (`/users/{u}/wants`, `/users/{u}/collection/folders/0/releases`).
+ * `basic_information` is a summary of the release: no tracklist and no `num_for_sale`. `master_id` is
+ * `0` for a release without a master (checked live 2026-10-17). A collection item also has
+ * `instance_id` and `folder_id`, which are ignored.
+ */
+export interface DiscogsListItem {
+  /** The release id (equal to `basic_information.id`). */
+  id: number;
+  /** ISO 8601 with an offset, e.g. `2024-02-19T02:39:32-08:00`. */
+  date_added?: string;
+  basic_information: {
+    id: number;
+    master_id?: number;
+    title: string;
+    artists?: { id: number; name: string }[];
+  };
+}
+
+export interface DiscogsWantlistResponse {
+  pagination: DiscogsPagination;
+  wants: DiscogsListItem[];
+}
+
+export interface DiscogsCollectionResponse {
+  pagination: DiscogsPagination;
+  releases: DiscogsListItem[];
+}
+
 export interface DiscogsMasterVersionsResponse {
   pagination: DiscogsPagination;
   versions: DiscogsMasterVersion[];

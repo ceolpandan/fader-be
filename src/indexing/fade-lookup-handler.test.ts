@@ -9,7 +9,7 @@ import { fades, masterVersions, type FadeKind } from "../db/schema";
 import { DiscogsNotFoundError, DiscogsTransientError } from "../discogs-client";
 import { INLINE_PRIORITY, NonRetryableError, type EnqueueInput } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
-import { createFadeLookupHandler, markFadeLookupFailed } from "./fade-lookup-handler";
+import { createFadeLookupHandler, enqueueFadeLookup, markFadeLookupFailed } from "./fade-lookup-handler";
 
 describe("fade_lookup handler", () => {
   let dbPath: string;
@@ -199,5 +199,16 @@ describe("fade_lookup handler", () => {
           .all(),
       ).toHaveLength(1);
     });
+  });
+});
+
+describe("enqueueFadeLookup", () => {
+  it("queues a lookup ahead of everything else unless told a lower priority", () => {
+    const enqueue = vi.fn<(job: EnqueueInput) => number>(() => 1);
+
+    enqueueFadeLookup(enqueue, "u1", "master", 5);
+    enqueueFadeLookup(enqueue, "u1", "master", 6, 5);
+
+    expect(enqueue.mock.calls.map(([job]) => job.priority)).toEqual([INLINE_PRIORITY, 5]);
   });
 });

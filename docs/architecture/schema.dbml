@@ -15,6 +15,8 @@ table releases {
   rating_count integer
   have_count integer
   want_count integer
+  num_for_sale integer
+  num_for_sale_at integer
   enriched_at integer
   missing_at integer
   version_count integer [not null, default: 1]
@@ -122,6 +124,41 @@ table discogs_profiles {
   collection_count integer [not null]
   wantlist_count integer [not null]
   fetched_at integer [not null]
+  last_synced_at integer
+}
+
+table collection_items {
+  uid text [not null]
+  release_id integer [not null]
+  master_id integer
+  title text [not null]
+  artists text [not null]
+
+  indexes {
+    (uid, release_id) [pk]
+  }
+}
+
+table wantlist_items {
+  uid text [not null]
+  release_id integer [not null]
+  master_id integer
+  title text [not null]
+  artists text [not null]
+  added_at integer
+
+  indexes {
+    (uid, release_id) [pk]
+  }
+}
+
+table hidden_releases {
+  uid text [not null]
+  release_id integer [not null]
+
+  indexes {
+    (uid, release_id) [pk]
+  }
 }
 
 table fades {
@@ -198,6 +235,22 @@ table scrape_unmatched {
 
   indexes {
     (scrape_id, position) [pk]
+  }
+}
+
+table scrape_search_matches {
+  scrape_id integer [not null]
+  position integer [not null]
+  line text [not null]
+  query text [not null]
+  status text [not null]
+  release_id integer
+  committed integer [not null, default: 0]
+  added_release integer [not null, default: 0]
+
+  indexes {
+    (scrape_id, position) [pk]
+    query [name: 'scrape_search_matches_query_idx']
   }
 }
 // Logical relations (not enforced by SQLite). releases.master_id has no Ref: it is nullable and

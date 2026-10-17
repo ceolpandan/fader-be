@@ -59,6 +59,10 @@ export const releases = sqliteTable(
     /** How many collectors have / want the release on Discogs; null until enriched with them. */
     haveCount: integer("have_count"),
     wantCount: integer("want_count"),
+    /** How many copies are for sale on Discogs when the release was last fetched; null until then (fader-ui#143). */
+    numForSale: integer("num_for_sale"),
+    /** When `numForSale` was last fetched; the wantlist refresh skips a release fetched within a day. */
+    numForSaleAt: integer("num_for_sale_at", { mode: "timestamp" }),
     /** When an enrichment run last refreshed the row from the Discogs API. */
     enrichedAt: integer("enriched_at", { mode: "timestamp" }),
     /** When an enrichment run found Discogs no longer has the release; Explore hides it. */
@@ -85,6 +89,8 @@ export const releases = sqliteTable(
     index("releases_version_count_idx").on(sql`${table.versionCount} DESC`, table.id),
     // Serves the rating sort, which puts releases that were never enriched last.
     index("releases_rating_idx").on(sql`(${table.ratingAverage} IS NULL)`, sql`${table.ratingAverage} DESC`, table.id),
+    // Serves the wantlist's fewest-for-sale-first sort, which puts releases with no count last.
+    index("releases_num_for_sale_idx").on(sql`(${table.numForSale} IS NULL)`, table.numForSale, table.id),
     // Serves the haves/wants filters, which only ever match the few enriched releases.
     index("releases_have_count_idx")
       .on(table.haveCount, table.id)
@@ -137,7 +143,7 @@ export const filterOptions = sqliteTable(
   (table) => [primaryKey({ columns: [table.kind, table.value] })],
 );
 
-export type QueueJobType = "fade_lookup" | "release_detail" | "discogs_profile" | "scrape_search";
+export type QueueJobType = "fade_lookup" | "release_detail" | "discogs_profile" | "discogs_sync" | "scrape_search";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
 /** Resolves a fade against Discogs: a release fade finds its master, a master fade fetches its versions. */
@@ -160,6 +166,11 @@ export interface DiscogsProfilePayload {
   uid: string;
 }
 
+/** Syncs the collector's Discogs wantlist and collection: mirrors both lists, hides what is on them, fades the other versions. */
+export interface DiscogsSyncPayload {
+  uid: string;
+}
+
 /** Searches Discogs for one unmatched scrape line and takes the first release it returns. */
 export interface ScrapeSearchPayload {
   uid: string;
@@ -171,6 +182,7 @@ export interface QueueJobPayloadMap {
   fade_lookup: FadeLookupPayload;
   release_detail: ReleaseDetailPayload;
   discogs_profile: DiscogsProfilePayload;
+  discogs_sync: DiscogsSyncPayload;
   scrape_search: ScrapeSearchPayload;
 }
 
@@ -181,7 +193,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
-    .$type<FadeLookupPayload | ReleaseDetailPayload | DiscogsProfilePayload | ScrapeSearchPayload>()
+    .$type<FadeLookupPayload | ReleaseDetailPayload | DiscogsProfilePayload | DiscogsSyncPayload | ScrapeSearchPayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
   priority: integer("priority").notNull().default(0),
@@ -237,6 +249,8 @@ export const discogsTokens = sqliteTable("discogs_tokens", {
 /**
  * What the collector's Discogs profile looked like when last fetched, for the home page. One row
  * per user, written only when every value was fetched, and dropped with the token it came from.
+ * A sync (`discogs_sync`) rewrites the counts from the mirrored lists and sets `lastSyncedAt`,
+ * which stays null until the first sync completes (the first Refresh asks for confirmation).
  */
 export const discogsProfiles = sqliteTable("discogs_profiles", {
   uid: text("uid").primaryKey(),
@@ -244,7 +258,49 @@ export const discogsProfiles = sqliteTable("discogs_profiles", {
   collectionCount: integer("collection_count").notNull(),
   wantlistCount: integer("wantlist_count").notNull(),
   fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
+  lastSyncedAt: integer("last_synced_at", { mode: "timestamp" }),
 });
+
+/**
+ * The releases in a collector's Discogs collection, as the last sync saw them: one row per release
+ * (instances and folders are ignored). Private to the collector. The release id need not be in
+ * `releases`, and `master_id` is null for a release without a master.
+ */
+export const collectionItems = sqliteTable(
+  "collection_items",
+  {
+    uid: text("uid").notNull(),
+    releaseId: integer("release_id").notNull(),
+    masterId: integer("master_id"),
+    title: text("title").notNull(),
+    artists: text("artists", { mode: "json" }).$type<ReleaseArtistStub[]>().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.uid, table.releaseId] })],
+);
+
+/** The releases on a collector's Discogs wantlist, as the last sync saw them: like `collection_items`, plus when each was added. */
+export const wantlistItems = sqliteTable(
+  "wantlist_items",
+  {
+    uid: text("uid").notNull(),
+    releaseId: integer("release_id").notNull(),
+    masterId: integer("master_id"),
+    title: text("title").notNull(),
+    artists: text("artists", { mode: "json" }).$type<ReleaseArtistStub[]>().notNull(),
+    addedAt: integer("added_at", { mode: "timestamp" }),
+  },
+  (table) => [primaryKey({ columns: [table.uid, table.releaseId] })],
+);
+
+/**
+ * The releases a collector already has or wants (Hidden). Written by the Discogs sync and, later,
+ * by the other imports. It is never a fade, and a fade is never hidden. Private to the collector.
+ */
+export const hiddenReleases = sqliteTable(
+  "hidden_releases",
+  { uid: text("uid").notNull(), releaseId: integer("release_id").notNull() },
+  (table) => [primaryKey({ columns: [table.uid, table.releaseId] })],
+);
 
 /** What a user faded: a master (hides every version under it) or a release without a master. */
 export const fades = sqliteTable(

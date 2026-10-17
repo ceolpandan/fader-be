@@ -7,12 +7,15 @@ import { getDiscogsToken } from "./db/discogs-tokens";
 import {
   getAllMasterVersionReleaseIds,
   getCollectionCount,
+  getCollectionPage,
   getRelease,
   getWantlistCount,
+  getWantlistPage,
   searchFirstReleaseId,
 } from "./discogs-client";
 import { failRun, finishRunsWithNothingLeft, finishRunWhenSettled } from "./enrichment/enrichment-run";
 import { createDiscogsProfileHandler } from "./indexing/discogs-profile-handler";
+import { createDiscogsSyncHandler } from "./indexing/discogs-sync-handler";
 import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
@@ -55,6 +58,16 @@ queue.registerHandler(
     getToken: (uid) => getDiscogsToken(db, uid),
     getCollectionCount,
     getWantlistCount,
+  }),
+);
+queue.registerHandler(
+  "discogs_sync",
+  createDiscogsSyncHandler({
+    db,
+    enqueue: (job) => queue.enqueue(job),
+    getToken: (uid) => getDiscogsToken(db, uid),
+    getWantlistPage,
+    getCollectionPage,
   }),
 );
 queue.onSettled((job) => markFadeLookupFailed(db, job));

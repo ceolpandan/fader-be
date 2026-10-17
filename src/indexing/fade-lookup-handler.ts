@@ -47,19 +47,24 @@ export function takeUpgradedMaster(uid: string, releaseId: number): number | und
   return masterId;
 }
 
-/** Queues a lookup for `uid`'s fade; user-driven, so it runs ahead of scans and enrichment. */
+/**
+ * Queues a lookup for `uid`'s fade; user-driven, so it runs ahead of scans and enrichment. The
+ * sync queues hundreds at once and passes a lower `priority`, so a fade a person is waiting on
+ * still goes first.
+ */
 export function enqueueFadeLookup(
   enqueue: (job: EnqueueInput) => number,
   uid: string,
   kind: FadeKind,
   id: number,
+  priority = INLINE_PRIORITY,
 ): void {
   const payload: FadeLookupPayload = { uid, kind, id };
   enqueue({
     runId: fadeLookupRunId(uid, id),
     type: "fade_lookup",
     payload,
-    priority: INLINE_PRIORITY,
+    priority,
   });
 }
 

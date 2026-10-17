@@ -1,6 +1,6 @@
 # Fader
 
-Fader helps a Discogs collector browse releases and hide the ones they aren't interested in. It keeps its own copy of release details so browsing doesn't depend on live Discogs. It has no sellers, inventories or listings, which the Discogs API terms of use don't allow (see `docs/adr/0005-no-seller-features.md`).
+Fader helps a Discogs collector browse releases and fade the ones they aren't interested in. It keeps its own copy of release details so browsing doesn't depend on live Discogs. It has no sellers, inventories or listings.
 
 ## Language
 
@@ -46,7 +46,7 @@ _Avoid_: Priority job, foreground job
 
 **Enrichment run**:
 A collector's fetch from the Discogs API, with their own token, of the releases a saved filter shows, to store each one's community rating and refresh its details. One active run per collector; only the latest is kept. Skips faded releases and, unless fresh, releases already enriched. See `docs/adr/0008-enrichment-runs.md`.
-_Avoid_: Scan, indexing, sync
+_Avoid_: Scan, indexing
 
 **Fresh enrichment**:
 An enrichment run that also re-fetches releases enriched before and overwrites them (and releases marked missing).
@@ -63,12 +63,34 @@ _Avoid_: Deleted release, dead release
 ## Hiding
 
 **Fade**:
-Hiding a release a collector isn't interested in, together with its master and every other version under that master. Fades belong to the collector who made them. The extension dims faded releases on Discogs pages.
-_Avoid_: Block, hide, ignore
+Setting aside a release a collector isn't interested in, together with its master and every other version under that master. Fades belong to the collector who made them. The extension dims faded releases on Discogs pages.
+_Avoid_: Block, ignore
 
 **Unfade**:
 Remove a fade, which brings back the release, its master and every other version under that master. A fade is stored per master (or per release without one), so unfading any version unfades them all.
-_Avoid_: Restore, unhide
+_Avoid_: Restore
+
+**Hidden**:
+A release the collector already has (it is in their **Collection**) or wants (it is on their **Wantlist**), so they have no use for it in Explore. Stored per collector (`hidden_releases`), written by the **Sync**. It is never a **Fade**, and a fade is never hidden: the sync deletes the release's own fade, and the other versions are covered by the master fade it writes. Hiding is exact-release. Reading it (Explore, the "Show hidden releases" setting) is fader-ui#118.
+_Avoid_: Owned, excluded, blocked
+
+## Collection and wantlist
+
+**Collection**:
+The releases in a collector's Discogs collection, as the last **Sync** saw them: one per release, whatever the number of copies or folders. Per collector (`collection_items`); a release not in the catalogue is kept.
+_Avoid_: Library, owned releases, haves
+
+**Wantlist**:
+The releases on a collector's Discogs wantlist, as the last **Sync** saw them, with when each was added. Per collector (`wantlist_items`); a release not in the catalogue is kept.
+_Avoid_: Wants, wishlist
+
+**Availability**:
+How many copies of a release are for sale on Discogs (`num_for_sale`). The wantlist payload does not carry it, so it comes from a release fetch; stored on the release and shown for wantlist items (fader-ui#143, fader-ui#144). Fader has no sellers, so it is a count and nothing more.
+_Avoid_: Stock, inventory, listings
+
+**Sync**:
+A collector's on-demand fetch of their **Wantlist** and then their **Collection** from Discogs, with their own token, as one job at queue priority 5. It writes nothing until every page is in, then in one transaction mirrors both lists, hides every release on either, deletes the release fade on each, and fades the master of each (unless the collector already did) so that every other version fades too. A release that leaves both lists loses its hidden row; the master fade stays. A failed sync leaves the previous data as it was. See `docs/adr/0009-collection-wantlist-sync.md`.
+_Avoid_: Import, scan, refresh
 
 ## Who uses it
 

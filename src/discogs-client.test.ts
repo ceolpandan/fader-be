@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getCollectionCount, getRelease, getWantlistCount, searchFirstReleaseId, DiscogsAuthError, DiscogsNotFoundError, DiscogsRateLimitError } from "./discogs-client";
+import { getCollectionCount, getCollectionPage, getRelease, getWantlistPage, getWantlistCount, searchFirstReleaseId, DiscogsAuthError, DiscogsNotFoundError, DiscogsRateLimitError } from "./discogs-client";
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
   return {
@@ -96,6 +96,61 @@ describe("collection and wantlist counts", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(401, {})));
 
     await expect(getWantlistCount("dan", "tok")).rejects.toThrow(DiscogsAuthError);
+  });
+});
+
+describe("collection and wantlist pages", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch(body: unknown) {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return jsonResponse(200, body);
+      }),
+    );
+    return urls;
+  }
+
+  it("reads a page of 100 from the All folder of the collection", async () => {
+    const urls = stubFetch({ pagination: { pages: 1 }, releases: [] });
+
+    await getCollectionPage("dan dan", 2, "tok");
+
+    expect(urls[0]).toBe("https://api.discogs.com/users/dan%20dan/collection/folders/0/releases?page=2&per_page=100");
+  });
+
+  it("reads a page of 100 from the wantlist", async () => {
+    const urls = stubFetch({ pagination: { pages: 1 }, wants: [] });
+
+    await getWantlistPage("dan dan", 3, "tok");
+
+    expect(urls[0]).toBe("https://api.discogs.com/users/dan%20dan/wants?page=3&per_page=100");
+  });
+
+  it("returns the items and the pagination as Discogs sent them", async () => {
+    stubFetch({ pagination: { page: 1, pages: 6, per_page: 100, items: 541 }, wants: [{ id: 5 }] });
+
+    const res = await getWantlistPage("dan", 1, "tok");
+
+    expect(res.pagination.pages).toBe(6);
+    expect(res.wants).toEqual([{ id: 5 }]);
+  });
+
+  it("throws DiscogsRateLimitError on 429, so the queue pauses the sync", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(429, {}, { "Retry-After": "30" })));
+
+    await expect(getCollectionPage("dan", 1, "tok")).rejects.toThrow(DiscogsRateLimitError);
+  });
+
+  it("throws DiscogsAuthError when Discogs refuses the token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(403, {})));
+
+    await expect(getWantlistPage("dan", 1, "tok")).rejects.toThrow(DiscogsAuthError);
   });
 });
 
