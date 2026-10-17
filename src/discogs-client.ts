@@ -1,7 +1,9 @@
 import type {
+  DiscogsCollectionResponse,
   DiscogsMaster,
   DiscogsMasterVersionsResponse,
   DiscogsRelease,
+  DiscogsWantlistResponse,
 } from "./types/discogs-api";
 import { logger } from "./util/logger";
 
@@ -98,6 +100,25 @@ export async function getWantlistCount(username: string, token: string): Promise
     token,
   );
   return wants.pagination.items;
+}
+
+/** Items per page of the wantlist and collection listings (Discogs' maximum). */
+export const LIST_PAGE_SIZE = 100;
+
+/** One page (from 1) of the collector's wantlist, `LIST_PAGE_SIZE` items to a page. */
+export function getWantlistPage(username: string, page: number, token: string) {
+  return discogsGet<DiscogsWantlistResponse>(
+    `/users/${encodeURIComponent(username)}/wants?page=${page}&per_page=${LIST_PAGE_SIZE}`,
+    token,
+  );
+}
+
+/** One page (from 1) of the collector's collection, every folder ("All", id 0), `LIST_PAGE_SIZE` items to a page. */
+export function getCollectionPage(username: string, page: number, token: string) {
+  return discogsGet<DiscogsCollectionResponse>(
+    `/users/${encodeURIComponent(username)}/collection/folders/0/releases?page=${page}&per_page=${LIST_PAGE_SIZE}`,
+    token,
+  );
 }
 
 export function getRelease(releaseId: number, token: string) {

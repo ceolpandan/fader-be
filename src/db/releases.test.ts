@@ -51,6 +51,8 @@ describe("releases table", () => {
       ratingCount: null,
       haveCount: null,
       wantCount: null,
+      numForSale: null,
+      numForSaleAt: null,
       enrichedAt: null,
       missingAt: null,
       versionCount: 1,

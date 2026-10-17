@@ -35,6 +35,8 @@ export function mapDiscogsReleaseToRow(raw: DiscogsRelease, enrichedAt: Date): t
     ratingCount: raw.community?.rating?.count ?? null,
     haveCount: raw.community?.have ?? null,
     wantCount: raw.community?.want ?? null,
+    numForSale: raw.num_for_sale ?? null,
+    numForSaleAt: enrichedAt,
     enrichedAt,
     missingAt: null,
   };

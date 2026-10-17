@@ -58,6 +58,17 @@ describe("discogs_profile handler", () => {
     expect(rows[0]!.collectionCount).toBe(121);
   });
 
+  it("keeps the time of the last sync when it replaces the counts", async () => {
+    const syncedAt = new Date("2026-10-17T10:00:00Z");
+    db.insert(discogsProfiles)
+      .values({ uid: "u1", username: "dan", collectionCount: 1, wantlistCount: 1, fetchedAt: new Date(0), lastSyncedAt: syncedAt })
+      .run();
+
+    await handler()({ uid: "u1" }, context);
+
+    expect(db.select().from(discogsProfiles).get()).toMatchObject({ collectionCount: 120, lastSyncedAt: syncedAt });
+  });
+
   it("caches nothing when the second request fails", async () => {
     getWantlistCount.mockRejectedValue(new DiscogsAuthError("revoked"));
 

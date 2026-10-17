@@ -47,6 +47,12 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 
 See `docs/adr/0008-enrichment-runs.md`. `ENRICH_MAX_RELEASES` caps one run (see `.env.example`).
 
+### Discogs profile and sync
+
+- `GET /me/discogs-profile` — the cached profile (username, collection and wantlist counts, `lastSyncedAt`) and the sync state (`sync.status`: `idle`, `running`, `failed`); fetches nothing
+- `POST /me/discogs-profile/counts` — fetch the two counts without syncing
+- `POST /me/discogs-profile/refresh` — start the sync of the collection and wantlist (202, poll the GET): it mirrors both lists, hides the releases on them and fades their masters. See `docs/adr/0009-collection-wantlist-sync.md`
+
 ### Saved filters
 
 - `GET /saved-filters`, `POST /saved-filters` (409 when the collector already saved that query), `PATCH /saved-filters/:id` (rename) and `DELETE /saved-filters/:id`
@@ -80,8 +86,8 @@ src/
   db/                Drizzle schema (releases, fades, master_versions,
                      discogs_queue_jobs, user_settings, saved_filters) + db client
   queue/             generic rate-limited, durable job queue (DiscogsQueue)
-  indexing/          queue job handlers: release detail, fade lookup
-  routes/            releases.ts, masters.ts, fade.ts, saved-filters.ts, settings.ts
+  indexing/          queue job handlers: release detail, fade lookup, Discogs sync
+  routes/            releases.ts, masters.ts, fade.ts, saved-filters.ts, settings.ts, discogs-profile.ts
   types/             raw Discogs API response types
   dto/               our DTOs (all Discogs release/master fields kept for now) + mappers
   docs/              openapi.yaml served via Swagger UI

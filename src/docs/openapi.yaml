@@ -932,12 +932,13 @@ paths:
   /me/discogs-profile:
     get:
       operationId: getDiscogsProfile
-      summary: The signed-in user's cached Discogs profile
+      summary: The signed-in user's cached Discogs profile and sync state
       description: >
-        What the last refresh fetched from Discogs with the user's saved token:
-        username, collection and wantlist counts. Nothing is fetched here;
-        `profile` is null until the first refresh and whenever there is no
-        token.
+        What the last fetch or sync got from Discogs with the user's saved
+        token: username, collection and wantlist counts, and when the last
+        sync completed. `sync` says whether a sync is queued or running, or
+        failed. Nothing is fetched here; `profile` is null until the first
+        fetch and whenever there is no token.
       responses:
         "200":
           description: The cached profile
@@ -945,15 +946,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DiscogsProfileDto"
-  /me/discogs-profile/refresh:
+  /me/discogs-profile/counts:
     post:
-      operationId: refreshDiscogsProfile
-      summary: Fetch the signed-in user's Discogs profile again
+      operationId: fetchDiscogsCounts
+      summary: Fetch the collection and wantlist counts, without syncing
       description: >
-        Queues the fetch like every other Discogs request, ahead of any
-        enrichment run, and waits for it. It asks Discogs with the user's saved
-        token and replaces the cached profile. A failed refresh leaves the
-        cached profile as it was.
+        Fills the home card, and the first sync's confirmation, before
+        anything is hidden. Queues the fetch like every other Discogs request,
+        ahead of any job, and waits for it. It asks Discogs with the user's
+        saved token and replaces the cached counts; `lastSyncedAt` is kept. A
+        failed fetch leaves the cached profile as it was.
       responses:
         "200":
           description: The profile as just fetched
@@ -989,6 +991,37 @@ paths:
           description: >
             The queue did not get to the fetch in time; it still runs, and the
             cached profile updates once it has
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /me/discogs-profile/refresh:
+    post:
+      operationId: refreshDiscogsProfile
+      summary: Sync the signed-in user's Discogs collection and wantlist
+      description: >
+        Starts the sync and answers at once; poll `GET /me/discogs-profile`
+        until `sync.status` is `idle` (done) or `failed`. One job at
+        queue priority 5 pages the wantlist, then the collection, with the
+        user's saved token and writes nothing until every page is in. Then, in
+        one transaction, it mirrors both lists (`collection_items`,
+        `wantlist_items`), hides every release on either list
+        (`hidden_releases`), deletes the release fade on each, and fades the
+        master of each (once, unless the user already faded it) with a
+        lookup that fades the other versions. A release that left both lists
+        loses its hidden row; the master fade stays. A failed sync leaves the
+        previous data as it was. A sync already queued or running is not
+        started twice. The UI asks for confirmation first while
+        `lastSyncedAt` is null.
+      responses:
+        "202":
+          description: The sync is queued or already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscogsProfileDto"
+        "409":
+          description: The user has no Discogs token saved
           content:
             application/json:
               schema:
@@ -1621,20 +1654,42 @@ components:
 
     DiscogsProfileDataDto:
       type: object
-      required: [username, collectionCount, wantlistCount, fetchedAt]
+      required: [username, collectionCount, wantlistCount, fetchedAt, lastSyncedAt]
       properties:
         username: { type: string }
         collectionCount:
           type: integer
-          description: Copies in the collection; a release owned twice counts twice.
+          description: >
+            Releases in the collection. Before the first sync it is Discogs'
+            own copy count, which counts a release owned twice twice.
         wantlistCount: { type: integer }
         fetchedAt:
           type: string
           format: date-time
+        lastSyncedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the last sync completed; null until the first one does.
+
+    DiscogsSyncDto:
+      type: object
+      required: [status, error]
+      properties:
+        status:
+          type: string
+          enum: [idle, running, failed]
+          description: >
+            `running` covers queued, running and paused-and-retrying;
+            `failed` keeps the last sync's error until the next one starts.
+        error:
+          type: string
+          nullable: true
+          description: What the user can act on; set only while `status` is `failed`.
 
     DiscogsProfileDto:
       type: object
-      required: [tokenSet, profile]
+      required: [tokenSet, profile, sync]
       properties:
         tokenSet:
           type: boolean
@@ -1644,6 +1699,8 @@ components:
           allOf:
             - $ref: "#/components/schemas/DiscogsProfileDataDto"
           description: Null until the first fetch, and whenever there is no token.
+        sync:
+          $ref: "#/components/schemas/DiscogsSyncDto"
 
     DiscogsTokenDto:
       type: object
