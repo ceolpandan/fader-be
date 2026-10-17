@@ -15,6 +15,8 @@ export const SEARCH_PRIORITY = 5;
  * background enrichment (0), behind inline requests (a fade a person is waiting on).
  */
 export const SYNC_PRIORITY = 5;
+/** Priority of a collector's wantlist availability fetches: ahead of background enrichment (0), behind the sync and searches (5). */
+export const AVAILABILITY_PRIORITY = 1;
 export const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 export const BASE_BACKOFF_MS = 2000;
 /** The first pause after a transient Discogs error; each further failure in a row doubles it. */

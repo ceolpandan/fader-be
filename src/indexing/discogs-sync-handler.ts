@@ -13,7 +13,7 @@ import {
   type ReleaseArtistStub,
 } from "../db/schema";
 import type { DiscogsCollectionResponse, DiscogsListItem, DiscogsWantlistResponse } from "../types/discogs-api";
-import { NonRetryableError, PACING_MS, SYNC_PRIORITY, type EnqueueInput, type JobHandler } from "../queue/discogs-queue";
+import { AVAILABILITY_PRIORITY, NonRetryableError, PACING_MS, SYNC_PRIORITY, type EnqueueInput, type JobHandler } from "../queue/discogs-queue";
 import { logger } from "../util/logger";
 import { enqueueFadeLookup, hasStoredVersions } from "./fade-lookup-handler";
 
@@ -74,7 +74,7 @@ export function wantlistAvailabilityRunId(uid: string): string {
 export const AVAILABILITY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Once the sync has committed, queues a `release_detail` job (priority 0, behind the sync's own
+ * Once the sync has committed, queues a `release_detail` job (priority 1, behind the sync's own
  * priority-5 work) for each wantlist release that is not stored, was never enriched or has an
  * availability older than a day (fader-ui#143). A release another job already has queued is left to
  * that job, and one Discogs no longer has (`missing_at`) is not asked for again.
@@ -114,7 +114,7 @@ export function queueWantlistEnrichment(
     if (row?.missingAt) continue;
     const fresh = row && row.enrichedAt && row.numForSaleAt && row.numForSaleAt >= staleBefore;
     if (fresh) continue;
-    enqueue({ runId: wantlistAvailabilityRunId(uid), type: "release_detail", payload: { uid, releaseId } });
+    enqueue({ runId: wantlistAvailabilityRunId(uid), type: "release_detail", payload: { uid, releaseId }, priority: AVAILABILITY_PRIORITY });
     count += 1;
   }
   return count;

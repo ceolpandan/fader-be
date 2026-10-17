@@ -995,6 +995,136 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /wantlist:
+    get:
+      operationId: getWantlist
+      summary: The signed-in user's Discogs wantlist, with availability
+      description: >
+        The wantlist items (as the last sync mirrored them) that have a
+        `releases` row, a page at a time; only the signed-in user's own.
+        `numForSale` is how many copies are for sale on Discogs when the
+        release was last fetched. The default sort puts the fewest for sale
+        first and releases with no count last; `-addedAt` puts items Discogs
+        gave no date for last. 400 on invalid input.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [numForSale, -addedAt, artist, title]
+            default: numForSale
+        - name: hideNoneForSale
+          in: query
+          description: >
+            "true" leaves out items with a count of 0 copies for sale. Items
+            whose count is not fetched yet stay. `total` follows the filter;
+            `wantlistCount` does not.
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: One page of the wantlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WantlistPageDto"
+        "400":
+          description: Invalid page, pageSize or sort
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /wantlist/{releaseId}:
+    delete:
+      operationId: removeWantlistItem
+      summary: Take a release off the signed-in user's Discogs wantlist
+      description: >
+        Queued like every Discogs request, at inline priority (10): ahead of
+        the sync, availability fetches and enrichment. The request answers
+        once Discogs has removed the release (`DELETE /users/{username}/wants/{release_id}`;
+        a release that was already off the wantlist counts as removed). It then
+        leaves the mirror (`wantlist_items`) and, unless it is also in the
+        collection, `hidden_releases`, and the profile's wantlist count is
+        rewritten. Nothing local changes when Discogs refuses. It does not
+        fade the release: the caller fades it afterwards.
+      parameters:
+        - in: path
+          name: releaseId
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Removed from the Discogs wantlist and from the mirror of it
+        "400":
+          description: Invalid releaseId, or Discogs did not accept the token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: The release is not on this user's wantlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: No Discogs token saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Discogs failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is unavailable right now
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "504":
+          description: Discogs is busy; the removal is still queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /wantlist/unmatched:
+    get:
+      operationId: getWantlistUnmatched
+      summary: Wantlist items that have no release row yet
+      description: >
+        The signed-in user's wantlist items whose release is not in `releases`
+        (not enriched yet, or Discogs answered 404), newest added first, with
+        the title and artists the Discogs wantlist gave. Each carries the
+        `source` it was imported from. 400 on invalid input.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: One page of the unmatched items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WantlistUnmatchedPageDto"
+        "400":
+          description: Invalid page or pageSize
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /me/discogs-profile/refresh:
     post:
       operationId: refreshDiscogsProfile
@@ -1489,6 +1619,74 @@ components:
           type: string
           maxLength: 200
           description: Trimmed; must not be empty.
+
+    WantlistItemDto:
+      type: object
+      required: [releaseId, title, year, formats, artists, numForSale, addedAt]
+      properties:
+        releaseId: { type: integer }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseFormatDto"
+        artists:
+          type: array
+          items: { $ref: "#/components/schemas/ReleaseArtistStub" }
+        numForSale:
+          type: integer
+          nullable: true
+          description: Copies for sale on Discogs when the release was last fetched; null until then.
+        addedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    WantlistPageDto:
+      type: object
+      required: [items, page, pageSize, total, wantlistCount, unmatchedCount, availabilityUpdatedAt]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/WantlistItemDto" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer, description: Wantlist items that have a release row and pass the filter. }
+        wantlistCount: { type: integer, description: Wantlist items that have a release row, filter or not. }
+        unmatchedCount: { type: integer, description: Wantlist items with no release row yet. }
+        availabilityUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the newest `numForSale` among the wantlist was fetched; null if none has been.
+
+    WantlistUnmatchedItemDto:
+      type: object
+      required: [releaseId, title, artists, source, addedAt]
+      properties:
+        releaseId: { type: integer }
+        title: { type: string }
+        artists:
+          type: array
+          items: { $ref: "#/components/schemas/ReleaseArtistStub" }
+        source: { type: string, description: 'Where the entry came from, e.g. "Discogs wantlist".' }
+        addedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    WantlistUnmatchedPageDto:
+      type: object
+      required: [items, page, pageSize, total, wantlistCount]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/WantlistUnmatchedItemDto" }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer, description: Wantlist items with no release row. }
+        wantlistCount: { type: integer, description: Wantlist items that have a release row. }
 
     ScrapeUnmatchedDto:
       type: object
