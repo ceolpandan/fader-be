@@ -137,7 +137,7 @@ export const filterOptions = sqliteTable(
   (table) => [primaryKey({ columns: [table.kind, table.value] })],
 );
 
-export type QueueJobType = "fade_lookup" | "release_detail" | "discogs_profile";
+export type QueueJobType = "fade_lookup" | "release_detail" | "discogs_profile" | "scrape_search";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
 /** Resolves a fade against Discogs: a release fade finds its master, a master fade fetches its versions. */
@@ -160,10 +160,18 @@ export interface DiscogsProfilePayload {
   uid: string;
 }
 
+/** Searches Discogs for one unmatched scrape line and takes the first release it returns. */
+export interface ScrapeSearchPayload {
+  uid: string;
+  scrapeId: number;
+  position: number;
+}
+
 export interface QueueJobPayloadMap {
   fade_lookup: FadeLookupPayload;
   release_detail: ReleaseDetailPayload;
   discogs_profile: DiscogsProfilePayload;
+  scrape_search: ScrapeSearchPayload;
 }
 
 export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
@@ -173,7 +181,7 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
-    .$type<FadeLookupPayload | ReleaseDetailPayload | DiscogsProfilePayload>()
+    .$type<FadeLookupPayload | ReleaseDetailPayload | DiscogsProfilePayload | ScrapeSearchPayload>()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
   priority: integer("priority").notNull().default(0),
@@ -339,4 +347,37 @@ export const scrapeUnmatched = sqliteTable(
     line: text("line").notNull(),
   },
   (table) => [primaryKey({ columns: [table.scrapeId, table.position] })],
+);
+
+/**
+ * Where a Discogs search for a scrape line stands: `queued` until the search ran, `fetching` while
+ * the release it found is fetched into the catalogue, `matched` once the line is linked,
+ * `no_result` when Discogs found nothing, `failed` when the search or fetch could not finish, and
+ * `rejected` when the collector unlinked the match (it is not searched again).
+ */
+export type ScrapeSearchStatus = "queued" | "fetching" | "matched" | "no_result" | "failed" | "rejected";
+
+/**
+ * One row per scrape line that was searched on Discogs. A `matched` line is linked to the first
+ * release Discogs returned and stays `committed = false` (shown with a marker) until the collector
+ * confirms it. `added_release` says this match put the release in the scrape, so unlinking it
+ * takes the release out again; a release a line matched in the catalogue already stays.
+ */
+export const scrapeSearchMatches = sqliteTable(
+  "scrape_search_matches",
+  {
+    scrapeId: integer("scrape_id").notNull(),
+    position: integer("position").notNull(),
+    line: text("line").notNull(),
+    /** The line as sent to Discogs, after sanitising. */
+    query: text("query").notNull(),
+    status: text("status").$type<ScrapeSearchStatus>().notNull(),
+    releaseId: integer("release_id"),
+    committed: integer("committed", { mode: "boolean" }).notNull().default(false),
+    addedRelease: integer("added_release", { mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.scrapeId, table.position] }),
+    index("scrape_search_matches_query_idx").on(table.query),
+  ],
 );

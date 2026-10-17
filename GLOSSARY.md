@@ -78,6 +78,8 @@ _Avoid_: Preset, bookmark
 
 **Scrape**:
 A named list of `Artist - Title` lines a collector uploaded (a shop's stock, say), matched to releases when both the artist and the title are the same after ignoring case, accents and punctuation. A line that fits several pressings takes all of them; a line that matches nothing is kept as unmatched. Per collector, unique on the name; Explore filters by it and shows the unmatched lines. The matched releases are shared catalogue rows, so enriching them benefits every collector. Stored in `scrapes`, `scrape_releases` and `scrape_unmatched`, and carried over by the dump import.
+
+A collector with a Discogs token also has each unmatched line searched on Discogs after the upload (a `scrape_search` job, ahead of enrichment): the line as written, minus special characters, and the first release Discogs returns links to it. Such a match carries a marker until the collector commits it, and can be unlinked, which returns the line to unmatched as rejected. A hit the catalogue lacks is fetched first, so it counts as enriched. Stored in `scrape_search_matches`.
 _Avoid_: Import, upload (for the list itself), wishlist
 
 **Collector**:

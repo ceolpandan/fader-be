@@ -238,6 +238,7 @@ export function parseReleaseQuery(
   const excludeStyle = parseCommaSeparated(req.query.excludeStyle);
   const excludeFormat = parseCommaSeparated(req.query.excludeFormat);
   const country = parseCommaSeparated(req.query.country);
+  const excludeCountry = parseCommaSeparated(req.query.excludeCountry);
   const tracks = parseCommaSeparated(req.query.tracks);
   if (!tracks.every((t) => TRACK_COUNT_OPTIONS.includes(t))) {
     return { error: `tracks must be a comma-separated list of ${TRACK_COUNT_OPTIONS.join(", ")}` };
@@ -266,6 +267,8 @@ export function parseReleaseQuery(
   if (excludeStyle.length > 0) filters.push(hasNone("style", excludeStyle));
   if (excludeFormat.length > 0) filters.push(hasNone("format", excludeFormat));
   if (country.length > 0) filters.push(inArray(releases.country, country));
+  // A release with no country has none of the excluded ones, so it stays.
+  if (excludeCountry.length > 0) filters.push(sql`(${releases.country} IS NULL OR ${releases.country} NOT IN (${inList(excludeCountry)}))`);
   if (tracks.length > 0) filters.push(trackCountFilter(tracks));
   // A release has no links when it has no video links.
   if (noLinks === "only") filters.push(sql`json_array_length(${releases.videos}) = 0`);

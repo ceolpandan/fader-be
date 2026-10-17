@@ -144,6 +144,17 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(filtered.body.total).toBe(2);
     });
 
+    it("excludes countries, keeping releases with no country", async () => {
+      seedRelease(1, "UK one", { country: "UK" });
+      seedRelease(2, "US one", { country: "US" });
+      seedRelease(3, "FR one", { country: "FR" });
+      seedRelease(4, "No country");
+
+      expect(titles((await get("/releases?excludeCountry=UK")).body)).toEqual(["FR one", "No country", "US one"]);
+      expect(titles((await get("/releases?excludeCountry=UK,US")).body)).toEqual(["FR one", "No country"]);
+      expect(titles((await get("/releases?country=UK,US&excludeCountry=UK")).body)).toEqual(["US one"]);
+    });
+
     it("filters by haves, wants and wants per have, leaving out releases without them", async () => {
       for (const [id, title] of [[1, "Rare"], [2, "Common"], [3, "Unwanted"], [4, "Nobody"], [5, "Never enriched"]] as const) {
         seedRelease(id, title);
