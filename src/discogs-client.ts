@@ -115,6 +115,19 @@ function getMasterVersionsPage(masterId: number, page: number, token: string) {
   );
 }
 
+/**
+ * The id of the first release Discogs returns for a free-text search, or null when it finds none.
+ * Only releases are asked for (`type=release`), so a master or an artist never comes first.
+ */
+export async function searchFirstReleaseId(query: string, token: string): Promise<number | null> {
+  const res = await discogsGet<{ results?: { id: number; type?: string }[] }>(
+    `/database/search?type=release&per_page=1&q=${encodeURIComponent(query)}`,
+    token,
+  );
+  const first = res.results?.find((result) => result.type === undefined || result.type === "release");
+  return first ? first.id : null;
+}
+
 /** Walks every page of /masters/{id}/versions, returns all sibling release ids. */
 export async function getAllMasterVersionReleaseIds(masterId: number, token: string): Promise<number[]> {
   const ids: number[] = [];

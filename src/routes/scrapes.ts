@@ -1,18 +1,23 @@
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, inArray, type SQL } from "drizzle-orm";
 import { Router } from "express";
 import type { Db } from "../db/client";
+import { getDiscogsToken } from "../db/discogs-tokens";
 import { isNotMissing } from "../db/missing";
-import { releases, scrapeReleases, scrapes, scrapeUnmatched } from "../db/schema";
+import { releases, scrapeReleases, scrapes, scrapeSearchMatches, scrapeUnmatched } from "../db/schema";
 import type {
   AttachReleaseRequestDto,
   CreateScrapeRequestDto,
   RenameScrapeRequestDto,
   ScrapeDto,
+  ScrapeSearchMatchesDto,
   ScrapeUnmatchedDto,
+  SearchScrapeRequestDto,
+  SearchScrapeResponseDto,
 } from "../dto/scrape.dto";
 import type { DiscogsQueue } from "../queue/discogs-queue";
 import { matchScrapeLines } from "../scrapes/match-scrape";
 import { parseLines } from "../scrapes/normalise";
+import { queueScrapeSearches, scrapeSearchRunId, unlinkSearchMatch } from "../scrapes/scrape-search";
 import { logger } from "../util/logger";
 import { fetchReleaseFromDiscogs } from "./fetch-release";
 
@@ -49,13 +54,41 @@ export function createScrapesRouter(deps: ScrapesRouterDeps): Router {
   const countOf = (table: typeof scrapeReleases | typeof scrapeUnmatched, scrapeId: number): number =>
     db.select({ n: count() }).from(table).where(eq(table.scrapeId, scrapeId)).get()!.n;
 
+  const searchCount = (scrapeId: number, ...conditions: SQL[]): number =>
+    db
+      .select({ n: count() })
+      .from(scrapeSearchMatches)
+      .where(and(eq(scrapeSearchMatches.scrapeId, scrapeId), ...conditions))
+      .get()!.n;
+
   const toDto = (row: typeof scrapes.$inferSelect): ScrapeDto => ({
     id: row.id,
     name: row.name,
     createdAt: row.createdAt.toISOString(),
     releaseCount: countOf(scrapeReleases, row.id),
     unmatchedCount: countOf(scrapeUnmatched, row.id),
+    searchingCount: searchCount(row.id, inArray(scrapeSearchMatches.status, ["queued", "fetching"])),
+    uncommittedMatchCount: searchCount(
+      row.id,
+      eq(scrapeSearchMatches.status, "matched"),
+      eq(scrapeSearchMatches.committed, false),
+    ),
   });
+
+  /** Queues searches for the scrape's unmatched lines (all of them, or just the given positions). */
+  const searchUnmatched = (uid: string, scrapeId: number, positions?: number[]): number => {
+    const lines = db
+      .select({ position: scrapeUnmatched.position, line: scrapeUnmatched.line })
+      .from(scrapeUnmatched)
+      .where(
+        positions
+          ? and(eq(scrapeUnmatched.scrapeId, scrapeId), inArray(scrapeUnmatched.position, positions))
+          : eq(scrapeUnmatched.scrapeId, scrapeId),
+      )
+      .orderBy(asc(scrapeUnmatched.position))
+      .all();
+    return queueScrapeSearches(db, deps.queue, uid, scrapeId, lines);
+  };
 
   const ownScrape = (uid: string, rawId: string) => {
     const id = Number(rawId);
@@ -122,6 +155,8 @@ export function createScrapesRouter(deps: ScrapesRouterDeps): Router {
         }
         return created;
       });
+      // Searching needs the collector's Discogs token; without one the lines stay unmatched.
+      if (getDiscogsToken(db, uid)) searchUnmatched(uid, row.id);
       res.status(201).json(toDto(row));
     } catch (err) {
       // Another upload took the name while this one was matching.
@@ -161,7 +196,9 @@ export function createScrapesRouter(deps: ScrapesRouterDeps): Router {
       res.status(404).json({ error: "Scrape not found" });
       return;
     }
+    deps.queue.cancelRun(scrapeSearchRunId(scrape.id));
     db.transaction((tx) => {
+      tx.delete(scrapeSearchMatches).where(eq(scrapeSearchMatches.scrapeId, scrape.id)).run();
       tx.delete(scrapeReleases).where(eq(scrapeReleases.scrapeId, scrape.id)).run();
       tx.delete(scrapeUnmatched).where(eq(scrapeUnmatched.scrapeId, scrape.id)).run();
       tx.delete(scrapes).where(eq(scrapes.id, scrape.id)).run();
@@ -175,14 +212,149 @@ export function createScrapesRouter(deps: ScrapesRouterDeps): Router {
       res.status(404).json({ error: "Scrape not found" });
       return;
     }
-    const lines = db
-      .select({ position: scrapeUnmatched.position, line: scrapeUnmatched.line })
+    const rows = db
+      .select({
+        position: scrapeUnmatched.position,
+        line: scrapeUnmatched.line,
+        searchStatus: scrapeSearchMatches.status,
+      })
       .from(scrapeUnmatched)
+      .leftJoin(
+        scrapeSearchMatches,
+        and(
+          eq(scrapeSearchMatches.scrapeId, scrapeUnmatched.scrapeId),
+          eq(scrapeSearchMatches.position, scrapeUnmatched.position),
+        ),
+      )
       .where(eq(scrapeUnmatched.scrapeId, scrape.id))
       .orderBy(asc(scrapeUnmatched.position))
       .all();
-    const dto: ScrapeUnmatchedDto = { lines };
+    const dto: ScrapeUnmatchedDto = {
+      lines: rows.map((row) => ({
+        position: row.position,
+        line: row.line,
+        searchStatus: row.searchStatus === "matched" ? null : row.searchStatus,
+      })),
+    };
     res.set("Cache-Control", "no-store").json(dto);
+  });
+
+  /**
+   * Searches Discogs for the scrape's unmatched lines: every one not yet searched (or that found
+   * nothing or failed), or just the given positions. Needs the collector's Discogs token.
+   */
+  router.post("/:id/search", (req, res) => {
+    const { uid } = req.user!;
+    const scrape = ownScrape(uid, req.params.id);
+    if (!scrape) {
+      res.status(404).json({ error: "Scrape not found" });
+      return;
+    }
+    const { positions } = (req.body ?? {}) as Partial<Record<keyof SearchScrapeRequestDto, unknown>>;
+    if (
+      positions !== undefined &&
+      !(Array.isArray(positions) && positions.every((p) => typeof p === "number" && Number.isInteger(p)))
+    ) {
+      res.status(400).json({ error: "positions must be a list of integers" });
+      return;
+    }
+    if (!getDiscogsToken(db, uid)) {
+      res.status(409).json({ error: "Add a Discogs token in Settings to search Discogs", code: "token_required" });
+      return;
+    }
+    const dto: SearchScrapeResponseDto = { queued: searchUnmatched(uid, scrape.id, positions as number[] | undefined) };
+    res.json(dto);
+  });
+
+  /** The lines the Discogs search matched, with the release each was linked to. */
+  router.get("/:id/search-matches", (req, res) => {
+    const scrape = ownScrape(req.user!.uid, req.params.id);
+    if (!scrape) {
+      res.status(404).json({ error: "Scrape not found" });
+      return;
+    }
+    const rows = db
+      .select({
+        position: scrapeSearchMatches.position,
+        line: scrapeSearchMatches.line,
+        releaseId: scrapeSearchMatches.releaseId,
+        committed: scrapeSearchMatches.committed,
+        title: releases.title,
+        artists: releases.artists,
+      })
+      .from(scrapeSearchMatches)
+      .innerJoin(releases, eq(releases.id, scrapeSearchMatches.releaseId))
+      .where(and(eq(scrapeSearchMatches.scrapeId, scrape.id), eq(scrapeSearchMatches.status, "matched")))
+      .orderBy(asc(scrapeSearchMatches.position))
+      .all();
+    const dto: ScrapeSearchMatchesDto = {
+      matches: rows.map((row) => ({
+        position: row.position,
+        line: row.line,
+        releaseId: row.releaseId!,
+        title: row.title,
+        artists: row.artists.map((artist) => artist.name),
+        committed: row.committed,
+      })),
+    };
+    res.set("Cache-Control", "no-store").json(dto);
+  });
+
+  /** Confirms every searched match of the scrape, which clears their markers. */
+  router.post("/:id/search-matches/commit", (req, res) => {
+    const scrape = ownScrape(req.user!.uid, req.params.id);
+    if (!scrape) {
+      res.status(404).json({ error: "Scrape not found" });
+      return;
+    }
+    db.update(scrapeSearchMatches)
+      .set({ committed: true })
+      .where(and(eq(scrapeSearchMatches.scrapeId, scrape.id), eq(scrapeSearchMatches.status, "matched")))
+      .run();
+    res.json(toDto(scrape));
+  });
+
+  const ownMatch = (uid: string, rawId: string, rawPosition: string) => {
+    const scrape = ownScrape(uid, rawId);
+    const position = Number(rawPosition);
+    if (!scrape || !Number.isInteger(position)) return undefined;
+    const match = db
+      .select({ position: scrapeSearchMatches.position })
+      .from(scrapeSearchMatches)
+      .where(
+        and(
+          eq(scrapeSearchMatches.scrapeId, scrape.id),
+          eq(scrapeSearchMatches.position, position),
+          eq(scrapeSearchMatches.status, "matched"),
+        ),
+      )
+      .get();
+    return match ? { scrape, position } : undefined;
+  };
+
+  /** Confirms one searched match, which clears its marker. */
+  router.post("/:id/search-matches/:position/commit", (req, res) => {
+    const found = ownMatch(req.user!.uid, req.params.id, req.params.position);
+    if (!found) {
+      res.status(404).json({ error: "Searched match not found" });
+      return;
+    }
+    db.update(scrapeSearchMatches)
+      .set({ committed: true })
+      .where(and(eq(scrapeSearchMatches.scrapeId, found.scrape.id), eq(scrapeSearchMatches.position, found.position)))
+      .run();
+    res.json(toDto(found.scrape));
+  });
+
+  /** Takes a searched match back: the line returns to the unmatched list and is not searched again. */
+  router.post("/:id/search-matches/:position/unlink", (req, res) => {
+    const found = ownMatch(req.user!.uid, req.params.id, req.params.position);
+    if (!found) {
+      res.status(404).json({ error: "Searched match not found" });
+      return;
+    }
+    unlinkSearchMatch(db, found.scrape.id, found.position);
+    res.json(toDto(found.scrape));
   });
 
   /**

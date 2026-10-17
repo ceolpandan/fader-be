@@ -8,8 +8,8 @@ import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { discogsTokens, releases } from "../db/schema";
-import { DiscogsQueue, NonRetryableError } from "../queue/discogs-queue";
+import { discogsQueueJobs, discogsTokens, releases, scrapeReleases, scrapeSearchMatches, scrapeUnmatched } from "../db/schema";
+import { DiscogsQueue, NonRetryableError, SEARCH_PRIORITY } from "../queue/discogs-queue";
 import { encryptToken } from "../util/token-crypto";
 import { createApp } from "../app";
 
@@ -116,8 +116,8 @@ describe("scrapes", () => {
     const unmatched = await asUser(app, "u1").get(`/scrapes/${res.body.id}/unmatched`);
     expect(unmatched.body).toEqual({
       lines: [
-        { position: 4, line: "Nobody - Nothing Here" },
-        { position: 5, line: "no dash at all" },
+        { position: 4, line: "Nobody - Nothing Here", searchStatus: null },
+        { position: 5, line: "no dash at all", searchStatus: null },
       ],
     });
   });
@@ -130,7 +130,7 @@ describe("scrapes", () => {
 
     expect(res.body).toMatchObject({ releaseCount: 1, unmatchedCount: 1 });
     const unmatched = await asUser(app, "u1").get(`/scrapes/${res.body.id}/unmatched`);
-    expect(unmatched.body.lines).toEqual([{ position: 0, line: "Gone Artist - Flagged Title" }]);
+    expect(unmatched.body.lines).toEqual([{ position: 0, line: "Gone Artist - Flagged Title", searchStatus: null }]);
   });
 
   it("takes every pressing a line fits and no release of another artist", async () => {
@@ -218,7 +218,7 @@ describe("scrapes", () => {
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ releaseCount: 1, unmatchedCount: 1 });
       const unmatched = await asUser(app, "u1").get(`/scrapes/${created.body.id}/unmatched`);
-      expect(unmatched.body.lines).toEqual([{ position: 1, line: "Also - Missing" }]);
+      expect(unmatched.body.lines).toEqual([{ position: 1, line: "Also - Missing", searchStatus: null }]);
       const list = await asUser(app, "u1").get(`/releases?scrape=${created.body.id}`);
       expect(list.body.items.map((item: { releaseId: number }) => item.releaseId)).toEqual([1]);
     });
@@ -287,7 +287,7 @@ describe("scrapes", () => {
         expect(res.body.code).toBe("release_not_found");
         expect((await asUser(app, "u1").get("/releases/999")).status).toBe(404);
         expect((await asUser(app, "u1").get(`/scrapes/${created.body.id}/unmatched`)).body.lines).toEqual([
-          { position: 0, line: "Nobody - Nothing" },
+          { position: 0, line: "Nobody - Nothing", searchStatus: "queued" },
         ]);
         expect((await asUser(app, "u1").get("/scrapes")).body[0]).toMatchObject({ releaseCount: 0, unmatchedCount: 1 });
       });
@@ -338,6 +338,115 @@ describe("scrapes", () => {
 
       expect((await attach("u1", created.body.id, 0, 2)).status).toBe(404);
       expect((await attach("u2", created.body.id, 1, 2)).status).toBe(404);
+    });
+  });
+
+  describe("searching unmatched lines on Discogs", () => {
+    beforeEach(() => {
+      process.env.TOKEN_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+    });
+
+    const saveToken = (uid: string) =>
+      db
+        .insert(discogsTokens)
+        .values({ uid, tokenEncrypted: encryptToken("tok"), username: "dan", createdAt: new Date() })
+        .run();
+    const searchJobs = () => db.select().from(discogsQueueJobs).where(eq(discogsQueueJobs.type, "scrape_search")).all();
+
+    it("queues a search per unmatched line when the collector has a token", async () => {
+      saveToken("u1");
+
+      const res = await upload("u1", "Searched", "Last Rhythm - Last Rhythm\nNobody -Nothing\nDenko");
+
+      expect(res.body).toMatchObject({ releaseCount: 1, unmatchedCount: 2, searchingCount: 2, uncommittedMatchCount: 0 });
+      expect(searchJobs().map((job) => [job.priority, job.payload])).toEqual([
+        [SEARCH_PRIORITY, { uid: "u1", scrapeId: res.body.id, position: 1 }],
+        [SEARCH_PRIORITY, { uid: "u1", scrapeId: res.body.id, position: 2 }],
+      ]);
+      const unmatched = await asUser(app, "u1").get(`/scrapes/${res.body.id}/unmatched`);
+      expect(unmatched.body.lines.map((line: { searchStatus: string }) => line.searchStatus)).toEqual(["queued", "queued"]);
+    });
+
+    it("queues nothing without a token, and asks for one on a manual search", async () => {
+      const res = await upload("u1", "No token", "Nobody -Nothing");
+
+      expect(res.body.searchingCount).toBe(0);
+      expect(searchJobs()).toEqual([]);
+      const search = await asUser(app, "u1").post(`/scrapes/${res.body.id}/search`).send({});
+      expect(search.status).toBe(409);
+      expect(search.body.code).toBe("token_required");
+    });
+
+    it("searches again the lines that found nothing, and only the positions asked for", async () => {
+      saveToken("u1");
+      const res = await upload("u1", "Again", "Nobody -Nothing\nDenko");
+      db.update(scrapeSearchMatches).set({ status: "no_result" }).where(eq(scrapeSearchMatches.scrapeId, res.body.id)).run();
+      db.delete(discogsQueueJobs).run();
+
+      const search = await asUser(app, "u1").post(`/scrapes/${res.body.id}/search`).send({ positions: [1] });
+
+      expect(search.body).toEqual({ queued: 1 });
+      expect(searchJobs().map((job) => job.payload)).toEqual([{ uid: "u1", scrapeId: res.body.id, position: 1 }]);
+      expect((await asUser(app, "u1").post(`/scrapes/${res.body.id}/search`).send({ positions: "x" })).status).toBe(400);
+      expect((await asUser(app, "u2").post(`/scrapes/${res.body.id}/search`).send({})).status).toBe(404);
+    });
+
+    describe("matches", () => {
+      let scrapeId: number;
+
+      beforeEach(async () => {
+        const res = await upload("u1", "Matched", "Nobody -Nothing\nDenko");
+        scrapeId = res.body.id;
+        db.delete(scrapeUnmatched).where(eq(scrapeUnmatched.position, 0)).run();
+        db.insert(scrapeReleases).values({ scrapeId, releaseId: 2 }).run();
+        db.insert(scrapeSearchMatches)
+          .values({ scrapeId, position: 0, line: "Nobody -Nothing", query: "Nobody Nothing", status: "matched", releaseId: 2, addedRelease: true })
+          .run();
+      });
+
+      it("lists them with the release and counts them until committed", async () => {
+        const list = await asUser(app, "u1").get(`/scrapes/${scrapeId}/search-matches`);
+        expect(list.body.matches).toEqual([
+          { position: 0, line: "Nobody -Nothing", releaseId: 2, title: "Strange Things Happening", artists: ["Primary Sequence"], committed: false },
+        ]);
+        expect((await asUser(app, "u1").get("/scrapes")).body[0]).toMatchObject({ uncommittedMatchCount: 1 });
+
+        const commit = await asUser(app, "u1").post(`/scrapes/${scrapeId}/search-matches/0/commit`);
+
+        expect(commit.body).toMatchObject({ uncommittedMatchCount: 0, releaseCount: 1 });
+        expect((await asUser(app, "u1").get(`/scrapes/${scrapeId}/search-matches`)).body.matches[0].committed).toBe(true);
+      });
+
+      it("commits all of them at once", async () => {
+        const commit = await asUser(app, "u1").post(`/scrapes/${scrapeId}/search-matches/commit`);
+
+        expect(commit.body.uncommittedMatchCount).toBe(0);
+      });
+
+      it("unlinks a match, which returns the line to unmatched as rejected", async () => {
+        const res = await asUser(app, "u1").post(`/scrapes/${scrapeId}/search-matches/0/unlink`);
+
+        expect(res.body).toMatchObject({ releaseCount: 0, unmatchedCount: 2, uncommittedMatchCount: 0 });
+        const unmatched = await asUser(app, "u1").get(`/scrapes/${scrapeId}/unmatched`);
+        expect(unmatched.body.lines[0]).toEqual({ position: 0, line: "Nobody -Nothing", searchStatus: "rejected" });
+      });
+
+      it("404s for a line without a match or a scrape that is not the collector's", async () => {
+        expect((await asUser(app, "u1").post(`/scrapes/${scrapeId}/search-matches/1/commit`)).status).toBe(404);
+        expect((await asUser(app, "u2").post(`/scrapes/${scrapeId}/search-matches/0/unlink`)).status).toBe(404);
+        expect((await asUser(app, "u2").get(`/scrapes/${scrapeId}/search-matches`)).status).toBe(404);
+      });
+
+      it("drops the matches and cancels the pending searches when the scrape is deleted", async () => {
+        saveToken("u1");
+        await asUser(app, "u1").post(`/scrapes/${scrapeId}/search`).send({});
+        expect(searchJobs()).toHaveLength(1);
+
+        await asUser(app, "u1").delete(`/scrapes/${scrapeId}`);
+
+        expect(searchJobs()).toEqual([]);
+        expect(db.select().from(scrapeSearchMatches).all()).toEqual([]);
+      });
     });
   });
 

@@ -175,7 +175,7 @@ function carryOverReleases(target: Database.Database, oldPath: string): number {
 }
 
 /** The per-collector tables a re-import keeps; scrapes point at release ids, which carry over with the releases. */
-const CARRIED_TABLES = ["fades", "user_settings", "saved_filters", "discogs_tokens", "scrapes", "scrape_releases", "scrape_unmatched"];
+const CARRIED_TABLES = ["fades", "user_settings", "saved_filters", "discogs_tokens", "scrapes", "scrape_releases", "scrape_unmatched", "scrape_search_matches"];
 
 /** Copies `CARRIED_TABLES`, by the columns both databases have. Returns the fades copied. */
 function carryOver(target: Database.Database, oldPath: string): number {

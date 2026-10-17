@@ -4,12 +4,19 @@ import path from "node:path";
 import { createApp } from "./app";
 import { createDb } from "./db/client";
 import { getDiscogsToken } from "./db/discogs-tokens";
-import { getAllMasterVersionReleaseIds, getCollectionCount, getRelease, getWantlistCount } from "./discogs-client";
+import {
+  getAllMasterVersionReleaseIds,
+  getCollectionCount,
+  getRelease,
+  getWantlistCount,
+  searchFirstReleaseId,
+} from "./discogs-client";
 import { failRun, finishRunsWithNothingLeft, finishRunWhenSettled } from "./enrichment/enrichment-run";
 import { createDiscogsProfileHandler } from "./indexing/discogs-profile-handler";
 import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
+import { createScrapeSearchHandler, failScrapeSearches, settleScrapeSearch } from "./scrapes/scrape-search";
 import { logger } from "./util/logger";
 
 process.on("uncaughtException", (err) => {
@@ -51,8 +58,14 @@ queue.registerHandler(
   }),
 );
 queue.onSettled((job) => markFadeLookupFailed(db, job));
+queue.registerHandler(
+  "scrape_search",
+  createScrapeSearchHandler({ db, queue, getToken: (uid) => getDiscogsToken(db, uid), searchFirstReleaseId }),
+);
 queue.onSettled((job) => finishRunWhenSettled(db, job));
+queue.onSettled((job) => settleScrapeSearch(db, job));
 queue.onRunAborted((runId, cause) => failRun(db, runId, cause));
+queue.onRunAborted((runId) => failScrapeSearches(db, runId));
 // Runs and their jobs are stored, so a run the server stopped in the middle of carries on.
 finishRunsWithNothingLeft(db);
 queue.start();

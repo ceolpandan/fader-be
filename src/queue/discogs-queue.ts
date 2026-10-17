@@ -8,6 +8,8 @@ export const PACING_MS = 1100;
 export const MAX_ATTEMPTS = 3;
 /** Priority for work a user is actively waiting on (vs. 0 for background indexing). */
 export const INLINE_PRIORITY = 10;
+/** Priority of a Discogs search for a scrape line: ahead of background enrichment (0), behind inline requests. */
+export const SEARCH_PRIORITY = 5;
 export const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 export const BASE_BACKOFF_MS = 2000;
 /** The first pause after a transient Discogs error; each further failure in a row doubles it. */

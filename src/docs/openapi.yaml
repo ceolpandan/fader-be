@@ -48,6 +48,11 @@ paths:
           description: Comma-separated country names, OR-matched
           schema:
             type: string
+        - name: excludeCountry
+          in: query
+          description: Comma-separated country names; releases from any of them are left out (releases with no country stay)
+          schema:
+            type: string
         - name: tracks
           in: query
           description: Comma-separated track counts, OR-matched; each is 1 to 6, or 7+ for seven or more
@@ -598,6 +603,8 @@ paths:
         accents, punctuation, "&" versus "and", a leading "The" and a Discogs disambiguation
         number. A line that fits several pressings takes all of them. The answer comes when the
         matching is done, which takes several seconds. Blank lines and repeated lines are ignored.
+        When the user has a Discogs token, a Discogs search is then queued for each line that
+        matched nothing (see `searchScrapeUnmatched`); it finishes after the answer.
       requestBody:
         required: true
         content:
@@ -699,6 +706,154 @@ paths:
                 $ref: "#/components/schemas/ScrapeUnmatchedDto"
         "404":
           description: No such scrape for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes/{id}/search:
+    post:
+      operationId: searchScrapeUnmatched
+      summary: Search Discogs for a scrape's unmatched lines
+      description: >
+        Queues one Discogs search per line (the line as written, with special characters other
+        than apostrophes removed), behind inline requests and ahead of enrichment, with the user's
+        own token. The first release Discogs returns links to the line; one the catalogue lacks is
+        fetched first. A scrape upload queues these searches itself when the user has a token.
+        Lines already queued, matched or rejected are left alone. The answer comes at once;
+        progress is `searchingCount` on the scrape.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchScrapeRequestDto"
+      responses:
+        "200":
+          description: How many searches were queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchScrapeResponseDto"
+        "400":
+          description: positions is not a list of integers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: No such scrape for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: The user has no Discogs token (code token_required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes/{id}/search-matches:
+    get:
+      operationId: getScrapeSearchMatches
+      summary: The lines the Discogs search matched
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The matched lines in file order, with the release each was linked to
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeSearchMatchesDto"
+        "404":
+          description: No such scrape for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes/{id}/search-matches/commit:
+    post:
+      operationId: commitScrapeSearchMatches
+      summary: Confirm every searched match of a scrape
+      description: Clears the marker of all of them. Committed or not, a match filters and enriches the same.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The scrape with its new counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeDto"
+        "404":
+          description: No such scrape for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes/{id}/search-matches/{position}/commit:
+    post:
+      operationId: commitScrapeSearchMatch
+      summary: Confirm one searched match
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: position
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The scrape with its new counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeDto"
+        "404":
+          description: No such scrape for this user, or no searched match at that line
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /scrapes/{id}/search-matches/{position}/unlink:
+    post:
+      operationId: unlinkScrapeSearchMatch
+      summary: Take a searched match back
+      description: >
+        The line returns to the unmatched list as rejected, so it is not searched again, and the
+        release leaves the scrape unless another line still holds it or the line's own matching
+        found it.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: position
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: The scrape with its new counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeDto"
+        "404":
+          description: No such scrape for this user, or no searched match at that line
           content:
             application/json:
               schema:
@@ -991,6 +1146,11 @@ components:
       in: query
       description: Comma-separated country names, OR-matched
       schema: { type: string }
+    ExcludeCountry:
+      name: excludeCountry
+      in: query
+      description: Comma-separated country names; releases from any of them are left out (releases with no country stay)
+      schema: { type: string }
     Tracks:
       name: tracks
       in: query
@@ -1258,7 +1418,7 @@ components:
 
     ScrapeDto:
       type: object
-      required: [id, name, createdAt, releaseCount, unmatchedCount]
+      required: [id, name, createdAt, releaseCount, unmatchedCount, searchingCount, uncommittedMatchCount]
       properties:
         id: { type: integer }
         name: { type: string }
@@ -1269,6 +1429,12 @@ components:
         unmatchedCount:
           type: integer
           description: Lines that matched no release.
+        searchingCount:
+          type: integer
+          description: Lines whose Discogs search is queued or waiting on a release fetch.
+        uncommittedMatchCount:
+          type: integer
+          description: Lines the Discogs search matched that the user has not committed yet; they carry a marker until then.
 
     CreateScrapeRequestDto:
       type: object
@@ -1301,12 +1467,61 @@ components:
 
     ScrapeUnmatchedLineDto:
       type: object
-      required: [position, line]
+      required: [position, line, searchStatus]
       properties:
         position:
           type: integer
           description: The line's place in the upload; it names the line when attaching a release to it.
         line: { type: string }
+        searchStatus:
+          type: string
+          nullable: true
+          enum: [queued, fetching, no_result, failed, rejected]
+          description: >
+            Where the Discogs search for the line stands: queued or fetching while it runs, no_result
+            when Discogs found nothing, failed when it could not finish, rejected when the user
+            took a match back. Null when the line was never searched.
+
+    SearchScrapeRequestDto:
+      type: object
+      properties:
+        positions:
+          type: array
+          items: { type: integer }
+          description: >
+            The lines to search. Omitted, every unmatched line that was not searched yet, found
+            nothing or failed.
+
+    SearchScrapeResponseDto:
+      type: object
+      required: [queued]
+      properties:
+        queued:
+          type: integer
+          description: How many searches were queued.
+
+    ScrapeSearchMatchesDto:
+      type: object
+      required: [matches]
+      properties:
+        matches:
+          type: array
+          items: { $ref: "#/components/schemas/ScrapeSearchMatchDto" }
+
+    ScrapeSearchMatchDto:
+      type: object
+      required: [position, line, releaseId, title, artists, committed]
+      properties:
+        position: { type: integer }
+        line: { type: string }
+        releaseId: { type: integer }
+        title: { type: string }
+        artists:
+          type: array
+          items: { type: string }
+        committed:
+          type: boolean
+          description: False until the user confirms the match; shown with a marker until then.
 
     AttachReleaseRequestDto:
       type: object
