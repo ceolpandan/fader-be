@@ -9,6 +9,7 @@ import {
   getCollectionCount,
   getCollectionPage,
   getRelease,
+  deleteWantlistItem,
   getWantlistCount,
   getWantlistPage,
   searchFirstReleaseId,
@@ -18,6 +19,7 @@ import { createDiscogsProfileHandler } from "./indexing/discogs-profile-handler"
 import { createDiscogsSyncHandler } from "./indexing/discogs-sync-handler";
 import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
+import { createWantlistRemoveHandler } from "./indexing/wantlist-remove-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
 import { createScrapeSearchHandler, failScrapeSearches, settleScrapeSearch } from "./scrapes/scrape-search";
 import { logger } from "./util/logger";
@@ -69,6 +71,10 @@ queue.registerHandler(
     getWantlistPage,
     getCollectionPage,
   }),
+);
+queue.registerHandler(
+  "wantlist_remove",
+  createWantlistRemoveHandler({ db, getToken: (uid) => getDiscogsToken(db, uid), deleteWantlistItem }),
 );
 queue.onSettled((job) => markFadeLookupFailed(db, job));
 queue.registerHandler(

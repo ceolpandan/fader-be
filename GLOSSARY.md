@@ -88,6 +88,10 @@ _Avoid_: Wants, wishlist
 How many copies of a release are for sale on Discogs (`num_for_sale`). The wantlist payload does not carry it, so it comes from a release fetch; stored on the release and shown for wantlist items (fader-ui#143, fader-ui#144). Fader has no sellers, so it is a count and nothing more.
 _Avoid_: Stock, inventory, listings
 
+**Unmatched**:
+A wantlist item whose release has no row in `releases` yet (its enrichment, fader-ui#143, has not run or Discogs answered 404). It is shown on the wantlist page's Unmatched tab with the title and artists the Discogs payload gave and a source label ("Discogs wantlist"); it moves to the Wantlist tab once the release is stored. Later imports reuse the tab with their own per-collector source label, never stored on `releases`.
+_Avoid_: Orphan, missing (missing is an enrichment term: Discogs no longer has the release)
+
 **Sync**:
 A collector's on-demand fetch of their **Wantlist** and then their **Collection** from Discogs, with their own token, as one job at queue priority 5. It writes nothing until every page is in, then in one transaction mirrors both lists, hides every release on either, deletes the release fade on each, and fades the master of each (unless the collector already did) so that every other version fades too. A release that leaves both lists loses its hidden row; the master fade stays. A failed sync leaves the previous data as it was. See `docs/adr/0009-collection-wantlist-sync.md`.
 _Avoid_: Import, scan, refresh

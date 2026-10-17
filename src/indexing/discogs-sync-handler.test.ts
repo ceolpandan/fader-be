@@ -18,7 +18,7 @@ import {
   wantlistItems,
 } from "../db/schema";
 import { DiscogsRateLimitError } from "../discogs-client";
-import { NonRetryableError, PACING_MS, SYNC_PRIORITY, type EnqueueInput } from "../queue/discogs-queue";
+import { AVAILABILITY_PRIORITY, NonRetryableError, PACING_MS, SYNC_PRIORITY, type EnqueueInput } from "../queue/discogs-queue";
 import type { DiscogsListItem } from "../types/discogs-api";
 import { createDiscogsSyncHandler } from "./discogs-sync-handler";
 
@@ -423,13 +423,14 @@ describe("discogs_sync handler", () => {
       db.insert(releases).values({ id, title: `Release ${id}`, genres: [], styles: [], formats: [], artists: [], ...extra }).run();
     const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000);
 
-    it("queues a priority 0 release_detail job for each wantlist release that is not stored, on its own label, without a run", async () => {
+    it("queues a priority 1 release_detail job for each wantlist release that is not stored, on its own label, without a run", async () => {
       await sync();
 
       expect(queuedIds()).toEqual([1, 2]);
       for (const job of jobs()) {
         expect(job.runId).toBe("wantlist-availability:u1");
-        expect(job.priority ?? 0).toBe(0);
+        expect(job.priority).toBe(AVAILABILITY_PRIORITY);
+        expect(job.priority).toBeGreaterThan(0);
         expect(job.priority ?? 0).toBeLessThan(SYNC_PRIORITY);
       }
       expect(db.select().from(enrichmentRuns).all()).toEqual([]);

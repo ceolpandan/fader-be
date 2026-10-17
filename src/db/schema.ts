@@ -143,7 +143,7 @@ export const filterOptions = sqliteTable(
   (table) => [primaryKey({ columns: [table.kind, table.value] })],
 );
 
-export type QueueJobType = "fade_lookup" | "release_detail" | "discogs_profile" | "discogs_sync" | "scrape_search";
+export type QueueJobType = "fade_lookup" | "release_detail" | "discogs_profile" | "discogs_sync" | "scrape_search" | "wantlist_remove";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
 /** Resolves a fade against Discogs: a release fade finds its master, a master fade fetches its versions. */
@@ -171,6 +171,12 @@ export interface DiscogsSyncPayload {
   uid: string;
 }
 
+/** Takes one release off the collector's Discogs wantlist, then off the mirror of it. */
+export interface WantlistRemovePayload {
+  uid: string;
+  releaseId: number;
+}
+
 /** Searches Discogs for one unmatched scrape line and takes the first release it returns. */
 export interface ScrapeSearchPayload {
   uid: string;
@@ -184,6 +190,7 @@ export interface QueueJobPayloadMap {
   discogs_profile: DiscogsProfilePayload;
   discogs_sync: DiscogsSyncPayload;
   scrape_search: ScrapeSearchPayload;
+  wantlist_remove: WantlistRemovePayload;
 }
 
 export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {

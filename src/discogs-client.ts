@@ -43,18 +43,18 @@ function retryAfterMs(res: Response): number | null {
 }
 
 /** Every request is made with a collector's own personal access token; there is no server-wide one. */
-async function discogsGet<T>(path: string, token: string): Promise<T> {
+async function discogsRequest<T>(method: "GET" | "DELETE", path: string, token: string): Promise<T> {
   const headers: Record<string, string> = { "User-Agent": USER_AGENT, Authorization: `Discogs token=${token}` };
 
-  logger.request("DISCOGS", "GET", path);
+  logger.request("DISCOGS", method, path);
   const start = Date.now();
   let res: Response;
   try {
-    res = await fetch(`${DISCOGS_API_BASE}${path}`, { headers });
+    res = await fetch(`${DISCOGS_API_BASE}${path}`, { method, headers });
   } catch (err) {
     throw new DiscogsTransientError(`Discogs request failed for ${path}: ${String(err)}`);
   }
-  logger.response("DISCOGS", "GET", path, res.status, Date.now() - start);
+  logger.response("DISCOGS", method, path, res.status, Date.now() - start);
 
   if (res.status === 404) {
     throw new DiscogsNotFoundError(`Discogs resource not found: ${path}`);
@@ -77,7 +77,12 @@ async function discogsGet<T>(path: string, token: string): Promise<T> {
     throw new Error(`Discogs API error ${res.status} for ${path}: ${await res.text()}`);
   }
 
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+function discogsGet<T>(path: string, token: string): Promise<T> {
+  return discogsRequest<T>("GET", path, token);
 }
 
 /** Who a personal access token belongs to. Rejects with `DiscogsAuthError` when Discogs does not accept the token. */
@@ -100,6 +105,15 @@ export async function getWantlistCount(username: string, token: string): Promise
     token,
   );
   return wants.pagination.items;
+}
+
+/** Takes a release off the collector's Discogs wantlist. Discogs answers 204, and 404 when it was not on it, which is the same outcome. */
+export async function deleteWantlistItem(username: string, releaseId: number, token: string): Promise<void> {
+  try {
+    await discogsRequest<void>("DELETE", `/users/${encodeURIComponent(username)}/wants/${releaseId}`, token);
+  } catch (err) {
+    if (!(err instanceof DiscogsNotFoundError)) throw err;
+  }
 }
 
 /** Items per page of the wantlist and collection listings (Discogs' maximum). */
