@@ -37,6 +37,9 @@ export function mapDiscogsReleaseToRow(raw: DiscogsRelease, enrichedAt: Date): t
     wantCount: raw.community?.want ?? null,
     numForSale: raw.num_for_sale ?? null,
     numForSaleAt: enrichedAt,
+    lowestPrice: raw.lowest_price ?? null,
+    // Discogs sends "" for a release with no cover.
+    thumb: raw.thumb || null,
     enrichedAt,
     missingAt: null,
   };

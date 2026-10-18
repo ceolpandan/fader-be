@@ -63,6 +63,10 @@ export const releases = sqliteTable(
     numForSale: integer("num_for_sale"),
     /** When `numForSale` was last fetched; the wantlist refresh skips a release fetched within a day. */
     numForSaleAt: integer("num_for_sale_at", { mode: "timestamp" }),
+    /** The cheapest current price on Discogs, in the fetching account's currency; null until enriched with it. */
+    lowestPrice: real("lowest_price"),
+    /** The release's cover thumbnail URL on Discogs; null until enriched, or when Discogs has none. */
+    thumb: text("thumb"),
     /** When an enrichment run last refreshed the row from the Discogs API. */
     enrichedAt: integer("enriched_at", { mode: "timestamp" }),
     /** When an enrichment run found Discogs no longer has the release; Explore hides it. */

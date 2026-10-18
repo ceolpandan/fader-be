@@ -17,6 +17,8 @@ table releases {
   want_count integer
   num_for_sale integer
   num_for_sale_at integer
+  lowest_price real
+  thumb text
   enriched_at integer
   missing_at integer
   version_count integer [not null, default: 1]
@@ -34,6 +36,7 @@ table releases {
     (country, id) [name: 'releases_country_idx']
     (version_count, id) [name: 'releases_version_count_idx']
     (rating_average, rating_average, id) [name: 'releases_rating_idx']
+    (num_for_sale, num_for_sale, id) [name: 'releases_num_for_sale_idx']
     (have_count, id) [name: 'releases_have_count_idx']
   }
 }

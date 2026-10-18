@@ -88,6 +88,14 @@ _Avoid_: Wants, wishlist
 How many copies of a release are for sale on Discogs (`num_for_sale`). The wantlist payload does not carry it, so it comes from a release fetch; stored on the release and shown for wantlist items (fader-ui#143, fader-ui#144). Fader has no sellers, so it is a count and nothing more.
 _Avoid_: Stock, inventory, listings
 
+**Lowest price**:
+The cheapest current price for a release on Discogs (`lowest_price`), a plain number in the currency of the account whose token fetched it. Stored on the release by the same fetch as **Availability**; null when Discogs sent none. Fader has no sellers, so it is a number and nothing more.
+_Avoid_: Price, cost, asking price
+
+**Cover**:
+A release's cover image, kept as the URL of its Discogs thumbnail (`thumb`) and nothing else: Fader stores no image bytes. Written by an enrichment fetch; null until then or when Discogs has no image, in which case the UI shows a generated gradient instead.
+_Avoid_: Artwork, image, thumbnail (the field is `thumb`)
+
 **Unmatched**:
 A wantlist item whose release has no row in `releases` yet (its enrichment, fader-ui#143, has not run or Discogs answered 404). It is shown on the wantlist page's Unmatched tab with the title and artists the Discogs payload gave and a source label ("Discogs wantlist"); it moves to the Wantlist tab once the release is stored. Later imports reuse the tab with their own per-collector source label, never stored on `releases`.
 _Avoid_: Orphan, missing (missing is an enrichment term: Discogs no longer has the release)

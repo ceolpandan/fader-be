@@ -110,6 +110,7 @@ describe("wantlist", () => {
   });
 
   it("lists the enriched items fewest for sale first, items with no count last", async () => {
+    db.update(releases).set({ lowestPrice: 4.5, thumb: "https://i.discogs.com/t.jpg" }).where(eq(releases.id, 2)).run();
     const res = await asUser(app, "u1").get("/wantlist");
 
     expect(res.status).toBe(200);
@@ -128,6 +129,8 @@ describe("wantlist", () => {
       formats: [{ name: "Vinyl", descriptions: ["LP"] }],
       artists: [{ id: 20, name: "Mid" }],
       numForSale: 1,
+      lowestPrice: 4.5,
+      thumb: "https://i.discogs.com/t.jpg",
       addedAt: "2026-03-01T00:00:00.000Z",
     });
   });

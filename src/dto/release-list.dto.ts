@@ -20,6 +20,8 @@ export interface ReleaseListItemDto {
   /** Discogs community rating; null until an enrichment run has fetched the release. */
   ratingAverage: number | null;
   ratingCount: number | null;
+  /** Cover thumbnail URL on Discogs; null until enriched or when Discogs has none. */
+  thumb: string | null;
   artists: ReleaseArtistStub[];
   labels: ReleaseLabel[];
   /** Stored releases under the same master, this one included (1 without a master): what fading its master clears. */

@@ -449,10 +449,11 @@ describe("fade", () => {
           title: null,
           artists: [],
           year: null,
+          thumb: null,
           versionsIndexed: 0,
           lookupStatus: "done",
         },
-        expect.objectContaining({ kind: "release", id: 555, title: "Beta", versionsIndexed: 1 }),
+        expect.objectContaining({ kind: "release", id: 555, title: "Beta", thumb: null, versionsIndexed: 1 }),
         expect.objectContaining({
           kind: "master",
           id: 900,
@@ -461,6 +462,14 @@ describe("fade", () => {
           versionsIndexed: 2,
         }),
       ]);
+    });
+
+    it("shows the cover of the first hidden release that has one", async () => {
+      db.update(releases).set({ thumb: "https://i.discogs.com/t.jpg" }).where(eq(releases.id, 112)).run();
+
+      const res = await asUser(app, "u1").get("/fade/items");
+
+      expect(res.body.items.find((i: { id: number }) => i.id === 900).thumb).toBe("https://i.discogs.com/t.jpg");
     });
 
     it("searches title and artist across every version, keeping fadedTotal unfiltered", async () => {

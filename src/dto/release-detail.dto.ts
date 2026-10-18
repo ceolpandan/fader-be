@@ -13,6 +13,10 @@ export interface ReleaseDetailDto {
   title: string;
   year: number | null;
   country: string | null;
+  /** Cover thumbnail URL on Discogs; null until enriched or when Discogs has none. */
+  thumb: string | null;
+  /** The cheapest current price on Discogs when the release was last fetched; null until then. */
+  lowestPrice: number | null;
   genres?: string[];
   styles?: string[];
   artists: ReleaseArtistStub[];

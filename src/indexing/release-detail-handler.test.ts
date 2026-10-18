@@ -99,6 +99,31 @@ describe("release_detail handler", () => {
     expect(row().numForSaleAt).toBeInstanceOf(Date);
   });
 
+  it("stores the cover thumbnail and the lowest price", async () => {
+    getRelease.mockResolvedValue(discogsRelease({ thumb: "https://i.discogs.com/t.jpg", lowest_price: 12.5 }));
+
+    await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+    expect(row()).toMatchObject({ thumb: "https://i.discogs.com/t.jpg", lowestPrice: 12.5 });
+  });
+
+  it("stores no thumbnail for an empty one, and no price for a release Discogs sent none for", async () => {
+    db.update(releases).set({ thumb: "https://i.discogs.com/old.jpg", lowestPrice: 3 }).where(eq(releases.id, 1)).run();
+    getRelease.mockResolvedValue(discogsRelease({ thumb: "" }));
+
+    await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+    expect(row()).toMatchObject({ thumb: null, lowestPrice: null });
+  });
+
+  it("keeps a lowest price of 0", async () => {
+    getRelease.mockResolvedValue(discogsRelease({ lowest_price: 0 }));
+
+    await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+    expect(row().lowestPrice).toBe(0);
+  });
+
   it("inserts the full row for a release that is not stored, off any enrichment run", async () => {
     getRelease.mockResolvedValue(discogsRelease({ id: 9, num_for_sale: 0 }));
 
