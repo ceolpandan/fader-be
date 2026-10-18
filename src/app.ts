@@ -8,6 +8,7 @@ import type { Db } from "./db/client";
 import { firebaseAuth } from "./middleware/firebase-auth";
 import { requestLogger } from "./middleware/request-logger";
 import type { DiscogsQueue } from "./queue/discogs-queue";
+import { createInlineReadRunner, type ReadRunner } from "./read/read-runner";
 import { createDiscogsProfileRouter } from "./routes/discogs-profile";
 import { createWantlistRouter } from "./routes/wantlist";
 import { createDiscogsTokenRouter } from "./routes/discogs-token";
@@ -26,13 +27,16 @@ const openapiSpec = yaml.load(fs.readFileSync(openapiPath, "utf8")) as Record<st
 export interface AppDeps {
   db: Db;
   queue: DiscogsQueue;
+  /** Where the slow release queries run; defaults to the calling thread (the server passes a worker pool). */
+  readRunner?: ReadRunner;
   /** How long `POST /fade` waits for the fade's lookup before answering `pending`. */
   fadeLookupWaitMs?: number;
   /** Asks Discogs who a token belongs to; defaults to the real API. */
   getIdentity?: (token: string) => Promise<{ id: number; username: string }>;
 }
 
-export function createApp(deps: AppDeps): Express {
+export function createApp(appDeps: AppDeps): Express {
+  const deps = { ...appDeps, readRunner: appDeps.readRunner ?? createInlineReadRunner(appDeps.db) };
   const app = express();
 
   app.use(cors({ origin: "http://localhost:4200" }));
