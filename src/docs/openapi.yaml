@@ -1428,7 +1428,7 @@ components:
     ReleaseListItemDto:
       type: object
       required:
-        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, artists, labels, versionCount]
+        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, thumb, artists, labels, versionCount]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -1449,6 +1449,10 @@ components:
           nullable: true
           description: Discogs community rating; null until an enrichment run has fetched the release.
         ratingCount: { type: integer, nullable: true }
+        thumb:
+          type: string
+          nullable: true
+          description: Cover thumbnail URL on Discogs; null until an enrichment run has fetched the release, or when Discogs has none.
         artists:
           type: array
           items:
@@ -1622,7 +1626,7 @@ components:
 
     WantlistItemDto:
       type: object
-      required: [releaseId, title, year, formats, artists, numForSale, addedAt]
+      required: [releaseId, title, year, formats, artists, numForSale, lowestPrice, thumb, addedAt]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -1638,6 +1642,14 @@ components:
           type: integer
           nullable: true
           description: Copies for sale on Discogs when the release was last fetched; null until then.
+        lowestPrice:
+          type: number
+          nullable: true
+          description: The cheapest current price on Discogs when the release was last fetched; null until then.
+        thumb:
+          type: string
+          nullable: true
+          description: Cover thumbnail URL on Discogs; null until enriched, or when Discogs has none.
         addedAt:
           type: string
           format: date-time
@@ -1947,7 +1959,7 @@ components:
 
     FadedItemDto:
       type: object
-      required: [kind, id, fadedAt, title, artists, year, versionsIndexed, lookupStatus]
+      required: [kind, id, fadedAt, title, artists, year, thumb, versionsIndexed, lookupStatus]
       properties:
         kind:
           type: string
@@ -1970,6 +1982,10 @@ components:
         year:
           type: integer
           nullable: true
+        thumb:
+          type: string
+          nullable: true
+          description: Cover thumbnail URL of the first hidden release that has one; null when none does.
         versionsIndexed:
           type: integer
           description: Indexed releases the fade hides; 0 when none is indexed.
@@ -2132,12 +2148,20 @@ components:
       type: object
       description: >
         Served from our own database.
-      required: [id, title, year, country, artists, labels, tracklist, videos]
+      required: [id, title, year, country, thumb, lowestPrice, artists, labels, tracklist, videos]
       properties:
         id: { type: integer }
         title: { type: string }
         year: { type: integer, nullable: true }
         country: { type: string, nullable: true }
+        thumb:
+          type: string
+          nullable: true
+          description: Cover thumbnail URL on Discogs; null until enriched, or when Discogs has none.
+        lowestPrice:
+          type: number
+          nullable: true
+          description: The cheapest current price on Discogs when the release was last fetched; null until then.
         genres:
           type: array
           items: { type: string }

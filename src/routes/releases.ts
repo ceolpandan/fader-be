@@ -77,6 +77,7 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
         formats: releases.formats,
         ratingAverage: releases.ratingAverage,
         ratingCount: releases.ratingCount,
+        thumb: releases.thumb,
         artists: releases.artists,
         labels: releases.labels,
         versionCount: releases.versionCount,

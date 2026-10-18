@@ -112,6 +112,7 @@ describe("GET /releases and /releases/filter-options", () => {
           formats: [],
           ratingAverage: null,
           ratingCount: null,
+          thumb: null,
           artists: [{ id: 7, name: "Band" }],
           labels: [],
           versionCount: 1,

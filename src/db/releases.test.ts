@@ -53,6 +53,8 @@ describe("releases table", () => {
       wantCount: null,
       numForSale: null,
       numForSaleAt: null,
+      lowestPrice: null,
+      thumb: null,
       enrichedAt: null,
       missingAt: null,
       versionCount: 1,

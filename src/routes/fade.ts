@@ -146,6 +146,7 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
         title: releases.title,
         year: releases.year,
         artists: releases.artists,
+        thumb: releases.thumb,
       })
       .from(releases)
       .innerJoin(
@@ -193,6 +194,7 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
           title: first?.title ?? fade.title,
           artists: first?.artists ?? fade.artists ?? [],
           year: first?.year ?? null,
+          thumb: versions.find((version) => version.thumb)?.thumb ?? null,
           versionsIndexed: versions.length,
           lookupStatus: fade.lookupStatus,
         };

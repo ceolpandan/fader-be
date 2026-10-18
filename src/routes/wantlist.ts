@@ -106,6 +106,8 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
         formats: releases.formats,
         artists: releases.artists,
         numForSale: releases.numForSale,
+        lowestPrice: releases.lowestPrice,
+        thumb: releases.thumb,
         addedAt: wantlistItems.addedAt,
       })
       .from(wantlistItems)
