@@ -21,6 +21,7 @@ import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-l
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
 import { createWantlistRemoveHandler } from "./indexing/wantlist-remove-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
+import { createWorkerReadRunner } from "./read/read-runner";
 import { createScrapeSearchHandler, failScrapeSearches, settleScrapeSearch } from "./scrapes/scrape-search";
 import { logger } from "./util/logger";
 
@@ -89,7 +90,8 @@ queue.onRunAborted((runId) => failScrapeSearches(db, runId));
 finishRunsWithNothingLeft(db);
 queue.start();
 
-const app = createApp({ db, queue });
+const readRunner = createWorkerReadRunner(dbPath, Number(process.env.READ_WORKERS) || 2);
+const app = createApp({ db, queue, readRunner });
 
 app.listen(port, () => {
   logger.info(`fader-be listening on http://localhost:${port}`);

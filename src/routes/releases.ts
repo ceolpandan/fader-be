@@ -1,19 +1,17 @@
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Router, type Response } from "express";
 import type { Db } from "../db/client";
-import { isFadedViaFades, isNotFadedFor } from "../db/fades";
-import { isNotMissing } from "../db/missing";
 import { filterOptions, releases, type FilterOptionKind } from "../db/schema";
-import type { ReleaseFilterOptionsDto, ReleaseListPageDto } from "../dto/release-list.dto";
+import type { ReleaseFilterOptionsDto } from "../dto/release-list.dto";
 import { mapReleaseRowToDto } from "../dto/mappers";
 import type { DiscogsQueue } from "../queue/discogs-queue";
+import type { ReadRunner } from "../read/read-runner";
 import { fetchReleaseFromDiscogs } from "./fetch-release";
-import { parseReleaseQuery } from "./release-query";
-import { rarityHaveMaxOf } from "./settings";
 
 export interface ReleasesRouterDeps {
   db: Db;
   queue: DiscogsQueue;
+  readRunner: ReadRunner;
 }
 
 export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
@@ -30,13 +28,6 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
     }
     res.json(mapReleaseRowToDto(row));
   }
-
-  const countReleases = (...where: SQL[]): number =>
-    deps.db
-      .select({ count: sql<number>`count(*)` })
-      .from(releases)
-      .where(and(...where))
-      .all()[0]!.count;
 
   /** The one static list per catalogue, filled by the importer. An `enriched` parameter from an older client is ignored. */
   router.get("/filter-options", (_req, res) => {
@@ -55,48 +46,20 @@ export function createReleasesRouter(deps: ReleasesRouterDeps): Router {
     res.json(dto);
   });
 
-  router.get("/", (req, res) => {
-    const { uid } = req.user!;
-    const parsed = parseReleaseQuery(req, rarityHaveMaxOf(deps.db, uid), uid);
-    if ("error" in parsed) {
-      res.status(400).json({ error: parsed.error });
+  router.get("/", async (req, res) => {
+    // The scans behind the list run on a worker thread, so they don't block other requests or the queue.
+    const abort = new AbortController();
+    res.on("close", () => abort.abort());
+    const result = await deps.readRunner.run(
+      "listReleases",
+      { query: { ...req.query }, uid: req.user!.uid },
+      { signal: abort.signal },
+    );
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
       return;
     }
-    const { page, pageSize, styleCombinations, orderBy } = parsed.query;
-    const filters = styleCombinations ? [...parsed.query.filters, styleCombinations] : parsed.query.filters;
-
-    const total = countReleases(isNotMissing, isNotFadedFor(uid), ...filters);
-    const rows = deps.db
-      .select({
-        releaseId: releases.id,
-        title: releases.title,
-        year: releases.year,
-        country: releases.country,
-        genres: releases.genres,
-        styles: releases.styles,
-        formats: releases.formats,
-        ratingAverage: releases.ratingAverage,
-        ratingCount: releases.ratingCount,
-        thumb: releases.thumb,
-        artists: releases.artists,
-        labels: releases.labels,
-        versionCount: releases.versionCount,
-      })
-      .from(releases)
-      .where(and(isNotMissing, isNotFadedFor(uid), ...filters))
-      .orderBy(...orderBy)
-      .limit(pageSize)
-      .offset((page - 1) * pageSize)
-      .all();
-
-    const dto: ReleaseListPageDto = {
-      items: rows,
-      page,
-      pageSize,
-      total,
-      fadedCount: countReleases(isNotMissing, isFadedViaFades(uid)),
-    };
-    res.json(dto);
+    res.json(result.page);
   });
 
   router.get("/:id", (req, res) => {

@@ -5,16 +5,17 @@ import {
   cancelActiveRun,
   currentRun,
   notFoundReleases,
-  previewRun,
   runProgress,
   startRun,
 } from "../enrichment/enrichment-run";
 import type { EnrichmentPreviewDto, EnrichmentRunDto, EnrichmentStatusDto } from "../dto/enrichment.dto";
 import type { DiscogsQueue } from "../queue/discogs-queue";
+import type { ReadRunner } from "../read/read-runner";
 
 export interface EnrichmentRouterDeps {
   db: Db;
   queue: DiscogsQueue;
+  readRunner: ReadRunner;
 }
 
 const MAX_QUERY_LENGTH = 4000;
@@ -51,13 +52,19 @@ export function createEnrichmentRouter(deps: EnrichmentRouterDeps): Router {
     return query.length <= MAX_QUERY_LENGTH ? query : null;
   }
 
-  router.get("/preview", (req, res) => {
+  router.get("/preview", async (req, res) => {
     const query = parseQuery(req.query.query ?? "");
     if (query === null) {
       res.status(400).json({ error: "query must be a string of at most 4000 characters" });
       return;
     }
-    const preview = previewRun(deps.db, req.user!.uid, query, req.query.fresh === "true");
+    const abort = new AbortController();
+    res.on("close", () => abort.abort());
+    const preview = await deps.readRunner.run(
+      "previewEnrichment",
+      { uid: req.user!.uid, query, fresh: req.query.fresh === "true" },
+      { signal: abort.signal },
+    );
     if ("error" in preview) {
       res.status(400).json({ error: preview.error });
       return;

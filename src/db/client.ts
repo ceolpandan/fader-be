@@ -9,3 +9,10 @@ export function createDb(path: string): Db {
   sqlite.pragma("journal_mode = WAL");
   return drizzle(sqlite, { schema });
 }
+
+/** A read-only connection for a worker thread; WAL lets it read while the main connection writes. */
+export function createReadOnlyDb(path: string): Db {
+  const sqlite = new Database(path, { readonly: true });
+  sqlite.pragma("busy_timeout = 5000");
+  return drizzle(sqlite, { schema });
+}
