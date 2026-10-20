@@ -1023,8 +1023,19 @@ paths:
           in: query
           description: >
             "true" leaves out items with a count of 0 copies for sale. Items
-            whose count is not fetched yet stay. `total` follows the filter;
+            whose count is not fetched yet stay. `total` follows the filters;
             `wantlistCount` does not.
+          schema: { type: boolean, default: false }
+        - name: folderId
+          in: query
+          description: >
+            Only the items in this wantlist folder (matched items only, as
+            always). Another user's folder shows nothing. Not with `hideFoldered`.
+          schema: { type: integer }
+        - name: hideFoldered
+          in: query
+          description: >
+            "true" leaves out items that are in any folder. Not with `folderId`.
           schema: { type: boolean, default: false }
       responses:
         "200":
@@ -1034,7 +1045,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/WantlistPageDto"
         "400":
-          description: Invalid page, pageSize or sort
+          description: Invalid page, pageSize, sort or folderId, or both folderId and hideFoldered
           content:
             application/json:
               schema:
@@ -1092,6 +1103,192 @@ paths:
                 $ref: "#/components/schemas/ErrorDto"
         "504":
           description: Discogs is busy; the removal is still queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /wantlist/folders:
+    get:
+      operationId: getWantlistFolders
+      summary: The signed-in user's wantlist folders
+      description: >
+        Fader-only folders for grouping wantlist items (never sent to Discogs),
+        sorted by name ignoring case. `itemCount` counts the folder's items that
+        are on the wantlist now.
+      responses:
+        "200":
+          description: The folders
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/WantlistFolderDto" }
+    post:
+      operationId: createWantlistFolder
+      summary: Create a wantlist folder and move releases into it
+      description: >
+        Atomic. The name is trimmed, 1-50 characters, and unique per user
+        ignoring case (409 otherwise). Releases already in another folder move
+        here (a release is in one folder at most). Ids not on the wantlist are
+        ignored and returned as `ignoredReleaseIds`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWantlistFolderRequestDto"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WantlistFolderChangeDto"
+        "400":
+          description: Invalid name or releaseIds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: The user already has a folder with that name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /wantlist/folders/{id}:
+    patch:
+      operationId: renameWantlistFolder
+      summary: Rename a wantlist folder
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameWantlistFolderRequestDto"
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WantlistFolderDto"
+        "400":
+          description: Invalid id or name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: No such folder for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: Another folder of this user has that name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+    delete:
+      operationId: deleteWantlistFolder
+      summary: Delete a wantlist folder
+      description: Deletes the folder and un-folders its items. The wantlist itself is untouched.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          description: Invalid id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: No such folder for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /wantlist/folders/{id}/items:
+    put:
+      operationId: addWantlistFolderItems
+      summary: Move releases into a wantlist folder
+      description: >
+        A release in another folder moves here. Ids not on the wantlist are
+        ignored and returned as `ignoredReleaseIds`.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WantlistFolderItemsRequestDto"
+      responses:
+        "200":
+          description: The folder after the move
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WantlistFolderChangeDto"
+        "400":
+          description: Invalid id or releaseIds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: No such folder for this user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+    delete:
+      operationId: removeWantlistFolderItems
+      summary: Take releases out of a wantlist folder
+      description: >
+        Releases not in this folder are left as they are. Ids not on the
+        wantlist are returned as `ignoredReleaseIds`.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WantlistFolderItemsRequestDto"
+      responses:
+        "200":
+          description: The folder after the removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WantlistFolderChangeDto"
+        "400":
+          description: Invalid id or releaseIds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: No such folder for this user
           content:
             application/json:
               schema:
@@ -1623,6 +1820,51 @@ components:
           type: string
           maxLength: 200
           description: Trimmed; must not be empty.
+
+    WantlistFolderDto:
+      type: object
+      required: [id, name, itemCount]
+      properties:
+        id: { type: integer }
+        name: { type: string, minLength: 1, maxLength: 50 }
+        itemCount: { type: integer, description: Items of the folder that are on the wantlist now. }
+
+    WantlistFolderChangeDto:
+      allOf:
+        - $ref: "#/components/schemas/WantlistFolderDto"
+        - type: object
+          required: [ignoredReleaseIds]
+          properties:
+            ignoredReleaseIds:
+              type: array
+              items: { type: integer }
+              description: Requested release ids that are not on the wantlist, so were ignored.
+
+    CreateWantlistFolderRequestDto:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 50, description: Trimmed; unique per user ignoring case. }
+        releaseIds:
+          type: array
+          maxItems: 1000
+          items: { type: integer, minimum: 1 }
+          description: Releases to move in; defaults to none.
+
+    WantlistFolderItemsRequestDto:
+      type: object
+      required: [releaseIds]
+      properties:
+        releaseIds:
+          type: array
+          maxItems: 1000
+          items: { type: integer, minimum: 1 }
+
+    RenameWantlistFolderRequestDto:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 50, description: Trimmed; unique per user ignoring case. }
 
     WantlistItemDto:
       type: object

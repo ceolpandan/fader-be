@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, max, sql, type SQL } from "drizzle-orm";
 import { Router, type Request } from "express";
 import type { Db } from "../db/client";
 import { getDiscogsToken } from "../db/discogs-tokens";
-import { releases, wantlistItems } from "../db/schema";
+import { releases, wantlistFolderItems, wantlistItems } from "../db/schema";
 import { DiscogsAuthError } from "../discogs-client";
 import type {
   WantlistItemDto,
@@ -93,10 +93,35 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
     }
 
     const hideNone = req.query.hideNoneForSale === "true";
+    const hideFoldered = req.query.hideFoldered === "true";
+    let folderId: number | undefined;
+    if (req.query.folderId !== undefined) {
+      folderId = Number(req.query.folderId);
+      if (!Number.isInteger(folderId) || folderId < 1) {
+        res.status(400).json({ error: "folderId must be a positive integer" });
+        return;
+      }
+      if (hideFoldered) {
+        res.status(400).json({ error: "folderId and hideFoldered cannot be used together" });
+        return;
+      }
+    }
+
+    const conditions: SQL[] = [eq(wantlistItems.uid, uid)];
     // Items with no count yet stay: only a count of 0 is "none for sale".
-    const shown = hideNone
-      ? and(eq(wantlistItems.uid, uid), sql`(${releases.numForSale} IS NULL OR ${releases.numForSale} > 0)`)
-      : eq(wantlistItems.uid, uid);
+    if (hideNone) conditions.push(sql`(${releases.numForSale} IS NULL OR ${releases.numForSale} > 0)`);
+    if (folderId !== undefined) {
+      conditions.push(
+        sql`EXISTS (SELECT 1 FROM ${wantlistFolderItems} WHERE ${wantlistFolderItems.uid} = ${uid} AND ${wantlistFolderItems.releaseId} = ${wantlistItems.releaseId} AND ${wantlistFolderItems.folderId} = ${folderId})`,
+      );
+    }
+    if (hideFoldered) {
+      conditions.push(
+        sql`NOT EXISTS (SELECT 1 FROM ${wantlistFolderItems} WHERE ${wantlistFolderItems.uid} = ${uid} AND ${wantlistFolderItems.releaseId} = ${wantlistItems.releaseId})`,
+      );
+    }
+    const shown = and(...conditions);
+    const filtered = conditions.length > 1;
 
     const rows = db
       .select({
@@ -129,7 +154,7 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
     const body: WantlistPageDto = {
       items,
       ...paging,
-      total: hideNone ? filteredCount(shown) : matchedCount(uid),
+      total: filtered ? filteredCount(shown) : matchedCount(uid),
       wantlistCount: matchedCount(uid),
       unmatchedCount: unmatchedCount(uid),
       availabilityUpdatedAt: updatedAt?.toISOString() ?? null,

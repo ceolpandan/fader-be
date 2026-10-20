@@ -11,6 +11,7 @@ import type { DiscogsQueue } from "./queue/discogs-queue";
 import { createInlineReadRunner, type ReadRunner } from "./read/read-runner";
 import { createDiscogsProfileRouter } from "./routes/discogs-profile";
 import { createWantlistRouter } from "./routes/wantlist";
+import { createWantlistFoldersRouter } from "./routes/wantlist-folders";
 import { createDiscogsTokenRouter } from "./routes/discogs-token";
 import { createEnrichmentRouter } from "./routes/enrichment";
 import { createFadeRouter } from "./routes/fade";
@@ -62,6 +63,7 @@ export function createApp(appDeps: AppDeps): Express {
   app.use("/saved-filters", createSavedFiltersRouter(deps));
   app.use("/scrapes", createScrapesRouter(deps));
   app.use("/me/discogs-profile", createDiscogsProfileRouter(deps));
+  app.use("/wantlist/folders", createWantlistFoldersRouter(deps));
   app.use("/wantlist", createWantlistRouter(deps));
   app.use("/settings/discogs-token", createDiscogsTokenRouter(deps));
   app.use("/settings", createSettingsRouter(deps));

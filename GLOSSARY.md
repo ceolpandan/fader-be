@@ -96,6 +96,10 @@ _Avoid_: Price, cost, asking price
 A release's cover image, kept as the URL of its Discogs thumbnail (`thumb`) and nothing else: Fader stores no image bytes. Written by an enrichment fetch; null until then or when Discogs has no image, in which case the UI shows a generated gradient instead.
 _Avoid_: Artwork, image, thumbnail (the field is `thumb`)
 
+**Wantlist folder**:
+A named group a collector puts wantlist items in, kept only in Fader and never sent to Discogs. A release is in at most one folder; adding it to another moves it. Names are trimmed, 1-50 characters and unique per collector ignoring case. Per collector (`wantlist_folders`, membership in `wantlist_folder_items`). A release that leaves the **Wantlist** (sync, fade, removal on Discogs) loses its membership; deleting a folder un-folders its items. A folder's count is of the items on the wantlist now. fader-ui#146.
+_Avoid_: Category (a UI filter term), list, tag
+
 **Unmatched**:
 A wantlist item whose release has no row in `releases` yet (its enrichment, fader-ui#143, has not run or Discogs answered 404). It is shown on the wantlist page's Unmatched tab with the title and artists the Discogs payload gave and a source label ("Discogs wantlist"); it moves to the Wantlist tab once the release is stored. Later imports reuse the tab with their own per-collector source label, never stored on `releases`.
 _Avoid_: Orphan, missing (missing is an enrichment term: Discogs no longer has the release)

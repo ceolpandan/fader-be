@@ -4,7 +4,15 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { collectionItems, discogsProfiles, discogsTokens, hiddenReleases, wantlistItems } from "../db/schema";
+import {
+  collectionItems,
+  discogsProfiles,
+  discogsTokens,
+  hiddenReleases,
+  wantlistFolderItems,
+  wantlistFolders,
+  wantlistItems,
+} from "../db/schema";
 import { DiscogsAuthError } from "../discogs-client";
 import { NonRetryableError } from "../queue/discogs-queue";
 import { createWantlistRemoveHandler } from "./wantlist-remove-handler";
@@ -82,5 +90,19 @@ describe("wantlist_remove handler", () => {
   it("fails without a token", async () => {
     await expect(handler(null)({ uid: "u1", releaseId: 1 }, context)).rejects.toBeInstanceOf(NonRetryableError);
     expect(deleteWantlistItem).not.toHaveBeenCalled();
+  });
+
+  it("drops the release's folder membership and no one else's", async () => {
+    db.insert(wantlistFolders).values({ id: 5, uid: "u1", name: "Maybe" }).run();
+    db.insert(wantlistFolderItems)
+      .values([
+        { uid: "u1", releaseId: 1, folderId: 5 },
+        { uid: "u1", releaseId: 2, folderId: 5 },
+      ])
+      .run();
+
+    await handler()({ uid: "u1", releaseId: 1 }, context);
+
+    expect(db.select().from(wantlistFolderItems).all()).toEqual([{ uid: "u1", releaseId: 2, folderId: 5 }]);
   });
 });

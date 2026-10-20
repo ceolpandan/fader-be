@@ -267,6 +267,13 @@
       "when": 1792310236172,
       "tag": "0037_easy_maelstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1792517975932,
+      "tag": "0038_heavy_vapor",
+      "breakpoints": true
     }
   ]
 }

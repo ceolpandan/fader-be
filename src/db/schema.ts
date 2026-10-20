@@ -304,6 +304,34 @@ export const wantlistItems = sqliteTable(
 );
 
 /**
+ * A collector's Fader-only folder for grouping wantlist items; never sent to Discogs. Names are
+ * unique per collector ignoring case (`wantlist_folders_uid_name_idx`).
+ */
+export const wantlistFolders = sqliteTable(
+  "wantlist_folders",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    uid: text("uid").notNull(),
+    name: text("name").notNull(),
+  },
+  (table) => [uniqueIndex("wantlist_folders_uid_name_idx").on(table.uid, sql`lower(${table.name})`)],
+);
+
+/** Which folder a wantlist release is in: at most one per release. Rows go when the release leaves the wantlist. */
+export const wantlistFolderItems = sqliteTable(
+  "wantlist_folder_items",
+  {
+    uid: text("uid").notNull(),
+    releaseId: integer("release_id").notNull(),
+    folderId: integer("folder_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.uid, table.releaseId] }),
+    index("wantlist_folder_items_folder_idx").on(table.folderId),
+  ],
+);
+
+/**
  * The releases a collector already has or wants (Hidden). Written by the Discogs sync and, later,
  * by the other imports. It is never a fade, and a fade is never hidden. Private to the collector.
  */
