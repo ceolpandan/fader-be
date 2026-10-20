@@ -15,6 +15,8 @@ import {
   hiddenReleases,
   masterVersions,
   releases,
+  wantlistFolderItems,
+  wantlistFolders,
   wantlistItems,
 } from "../db/schema";
 import { DiscogsRateLimitError } from "../discogs-client";
@@ -121,6 +123,28 @@ describe("discogs_sync handler", () => {
       expect(db.select().from(collectionItems).all()).toEqual([
         { uid: "u1", releaseId: 3, masterId: 200, title: "Title 3", artists: [{ id: 30, name: "Artist 3" }] },
         { uid: "u1", releaseId: 4, masterId: null, title: "Title 4", artists: [{ id: 40, name: "Artist 4" }] },
+      ]);
+    });
+
+    it("drops folder membership for releases that left the wantlist, and keeps the rest", async () => {
+      await sync();
+      db.insert(wantlistFolders).values({ id: 7, uid: "u1", name: "Maybe" }).run();
+      db.insert(wantlistFolderItems)
+        .values([
+          { uid: "u1", releaseId: 1, folderId: 7 },
+          { uid: "u1", releaseId: 2, folderId: 7 },
+          { uid: "u2", releaseId: 2, folderId: 7 },
+        ])
+        .run();
+      wants = [[item(1, 100)]];
+      serve();
+
+      await sync();
+
+      const members = db.select().from(wantlistFolderItems).all();
+      expect(members).toEqual([
+        { uid: "u1", releaseId: 1, folderId: 7 },
+        { uid: "u2", releaseId: 2, folderId: 7 },
       ]);
     });
 

@@ -8,6 +8,7 @@ import {
   wantlistItems,
   type WantlistRemovePayload,
 } from "../db/schema";
+import { pruneFolderMembership } from "../db/wantlist-folders";
 import { NonRetryableError, type JobHandler } from "../queue/discogs-queue";
 
 export interface WantlistRemoveHandlerDeps {
@@ -46,6 +47,7 @@ export function createWantlistRemoveHandler(deps: WantlistRemoveHandlerDeps): Jo
       if (!owned) {
         tx.delete(hiddenReleases).where(and(eq(hiddenReleases.uid, uid), eq(hiddenReleases.releaseId, releaseId))).run();
       }
+      pruneFolderMembership(tx, uid);
       const remaining = tx.select({ n: count() }).from(wantlistItems).where(eq(wantlistItems.uid, uid)).get()!.n;
       tx.update(discogsProfiles).set({ wantlistCount: remaining }).where(eq(discogsProfiles.uid, uid)).run();
     });

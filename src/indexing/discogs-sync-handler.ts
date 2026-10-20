@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
+import { pruneFolderMembership } from "../db/wantlist-folders";
 import {
   collectionItems,
   discogsProfiles,
@@ -195,6 +196,8 @@ export function createDiscogsSyncHandler(deps: DiscogsSyncHandlerDeps): JobHandl
       for (const { releaseId, masterId, title, artists } of owned) {
         deps.db.insert(collectionItems).values({ uid, releaseId, masterId, title, artists }).run();
       }
+
+      pruneFolderMembership(deps.db, uid);
 
       const hiddenNow = new Map<number, ListEntry>();
       for (const entry of [...wanted, ...owned]) {
