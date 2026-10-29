@@ -494,3 +494,32 @@ export const scrapeSearchMatches = sqliteTable(
     index("scrape_search_matches_query_idx").on(table.query),
   ],
 );
+
+/** A track of a release found on a digital store. */
+export interface DigitalMatchTrack {
+  /** The Discogs position of the track ("A1"). */
+  position: string;
+  title: string;
+  url: string;
+}
+
+/**
+ * What checking a release against a digital store found (fader-ui#160): `album` (`url` is the
+ * album), `tracks` (`tracks` holds the ones found) or `none`, kept so a rescan can skip it. Shared
+ * by every collector, like the release itself; one row per release and store, overwritten by a
+ * recheck.
+ */
+export const digitalMatches = sqliteTable(
+  "digital_matches",
+  {
+    releaseId: integer("release_id").notNull(),
+    store: text("store").notNull(),
+    status: text("status", { enum: ["album", "tracks", "none"] }).notNull(),
+    url: text("url"),
+    tracks: text("tracks", { mode: "json" }).$type<DigitalMatchTrack[]>().notNull().default([]),
+    /** How many of the release's tracks were searched, for `tracks` and `none`; null for `album`. */
+    trackCount: integer("track_count"),
+    checkedAt: integer("checked_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.releaseId, table.store] })],
+);

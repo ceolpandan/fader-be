@@ -286,6 +286,20 @@ table scrape_search_matches {
     query [name: 'scrape_search_matches_query_idx']
   }
 }
+
+table digital_matches {
+  release_id integer [not null]
+  store text [not null]
+  status text [not null]
+  url text
+  tracks text [not null, default: `[]`]
+  track_count integer
+  checked_at integer [not null]
+
+  indexes {
+    (release_id, store) [pk]
+  }
+}
 // Logical relations (not enforced by SQLite). releases.master_id has no Ref: it is nullable and
 // master_versions.master_id is only half of a composite key, so DBML cannot express it.
 Ref: release_genres.release_id > releases.id

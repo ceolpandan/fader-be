@@ -1,0 +1,69 @@
+import type { ReleaseArtistStub, ReleaseTrack } from "../db/schema";
+import { logger } from "../util/logger";
+import { artistsMatch, isVariousArtists, searchQuery, titlesMatch } from "./match";
+import type { PacedLane } from "./paced-lane";
+import type { DigitalMatchResult, DigitalStore, FoundTrack, StoreHit, StoreSession } from "./types";
+
+export interface CheckableRelease {
+  id: number;
+  title: string;
+  artists: ReleaseArtistStub[];
+  tracklist: ReleaseTrack[];
+}
+
+/** How many near-misses a miss logs, so the matching rules can be loosened after a test run. */
+const LOGGED_REJECTS = 3;
+
+/**
+ * Checks one release against one store: the album first, and only when that is not found, every
+ * track. Every request goes through the store's lane. Throws what the store throws
+ * (`StoreSessionExpiredError`, `StoreUnavailableError`).
+ *
+ * A hit counts when its title matches and its artist is one of the release's. A compilation
+ * ("Various") names no artist to check, so its album is not searched and a track counts when it
+ * is on an album of the same title.
+ */
+export async function checkRelease(
+  store: DigitalStore,
+  lane: PacedLane,
+  session: StoreSession,
+  release: CheckableRelease,
+): Promise<DigitalMatchResult> {
+  const various = isVariousArtists(release.artists);
+  const accepts = (hit: StoreHit, title: string): boolean =>
+    titlesMatch(hit.title, title) &&
+    (various ? hit.album !== null && titlesMatch(hit.album, release.title) : artistsMatch(hit.artist, release.artists));
+
+  if (store.searchReleases && !various) {
+    const query = searchQuery(release.artists, release.title);
+    const hits = await lane.run(() => store.searchReleases!(session, query));
+    const album = hits.find((hit) => hit.kind === "album" && accepts(hit, release.title));
+    if (album) return { status: "album", url: album.url, tracks: [], trackCount: null };
+    logRejects(store, release, query, hits);
+  }
+
+  if (store.searchTracks) {
+    const found: FoundTrack[] = [];
+    // A heading in the tracklist ("Side A") has no position and is not a track.
+    const tracks = release.tracklist.filter((t) => t.position.trim() !== "");
+    for (const track of tracks) {
+      const query = various ? `${release.title} ${track.title}` : searchQuery(release.artists, track.title);
+      const hits = await lane.run(() => store.searchTracks!(session, query));
+      const hit = hits.find((h) => h.kind === "track" && accepts(h, track.title));
+      if (hit) found.push({ position: track.position, title: track.title, url: hit.url });
+      else logRejects(store, release, query, hits);
+    }
+    if (found.length > 0) return { status: "tracks", url: null, tracks: found, trackCount: tracks.length };
+    return { status: "none", url: null, tracks: [], trackCount: tracks.length };
+  }
+
+  return { status: "none", url: null, tracks: [], trackCount: null };
+}
+
+function logRejects(store: DigitalStore, release: CheckableRelease, query: string, hits: StoreHit[]): void {
+  const near = hits
+    .slice(0, LOGGED_REJECTS)
+    .map((hit) => `${hit.artist} - ${hit.title}${hit.album ? ` [${hit.album}]` : ""}`)
+    .join(" | ");
+  logger.info(`${store.id}: no match for release ${release.id} with "${query}"${near ? `; rejected: ${near}` : ""}`);
+}

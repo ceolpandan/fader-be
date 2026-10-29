@@ -88,6 +88,7 @@ src/
                      discogs_queue_jobs, user_settings, saved_filters) + db client
   queue/             generic rate-limited, durable job queue (DiscogsQueue)
   indexing/          queue job handlers: release detail, fade lookup, Discogs sync
+  digital/           digital stores (Bandcamp) behind one check, store sessions, paced lane
   routes/            releases.ts, masters.ts, fade.ts, saved-filters.ts, settings.ts, discogs-profile.ts
   types/             raw Discogs API response types
   dto/               our DTOs (all Discogs release/master fields kept for now) + mappers

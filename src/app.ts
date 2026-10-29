@@ -5,11 +5,13 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import * as yaml from "js-yaml";
 import swaggerUi from "swagger-ui-express";
 import type { Db } from "./db/client";
+import { createDigitalStores, type DigitalStores } from "./digital/digital-stores";
 import { firebaseAuth } from "./middleware/firebase-auth";
 import { requestLogger } from "./middleware/request-logger";
 import type { DiscogsQueue } from "./queue/discogs-queue";
 import { createInlineReadRunner, type ReadRunner } from "./read/read-runner";
 import { createDiscogsProfileRouter } from "./routes/discogs-profile";
+import { createDigitalRouter } from "./routes/digital";
 import { createWantlistRouter } from "./routes/wantlist";
 import { createWantlistFoldersRouter } from "./routes/wantlist-folders";
 import { createDiscogsTokenRouter } from "./routes/discogs-token";
@@ -34,10 +36,16 @@ export interface AppDeps {
   fadeLookupWaitMs?: number;
   /** Asks Discogs who a token belongs to; defaults to the real API. */
   getIdentity?: (token: string) => Promise<{ id: number; username: string }>;
+  /** The digital stores and the sessions pasted for them; defaults to the real stores (`createDigitalStores`). */
+  digital?: DigitalStores;
 }
 
 export function createApp(appDeps: AppDeps): Express {
-  const deps = { ...appDeps, readRunner: appDeps.readRunner ?? createInlineReadRunner(appDeps.db) };
+  const deps = {
+    ...appDeps,
+    readRunner: appDeps.readRunner ?? createInlineReadRunner(appDeps.db),
+    digital: appDeps.digital ?? createDigitalStores(),
+  };
   const app = express();
 
   app.use(cors({ origin: "http://localhost:4200" }));
@@ -63,6 +71,7 @@ export function createApp(appDeps: AppDeps): Express {
   app.use("/saved-filters", createSavedFiltersRouter(deps));
   app.use("/scrapes", createScrapesRouter(deps));
   app.use("/me/discogs-profile", createDiscogsProfileRouter(deps));
+  app.use("/digital", createDigitalRouter(deps));
   app.use("/wantlist/folders", createWantlistFoldersRouter(deps));
   app.use("/wantlist", createWantlistRouter(deps));
   app.use("/settings/discogs-token", createDiscogsTokenRouter(deps));

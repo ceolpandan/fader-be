@@ -136,6 +136,7 @@ describe("wantlist", () => {
       lowestPriceCurrency: "EUR",
       thumb: "https://i.discogs.com/t.jpg",
       addedAt: "2026-03-01T00:00:00.000Z",
+      digitalMatches: [],
     });
   });
 

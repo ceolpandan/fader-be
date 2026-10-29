@@ -112,6 +112,24 @@ _Avoid_: Orphan, missing (missing is an enrichment term: Discogs no longer has t
 A collector's on-demand fetch of their **Wantlist** and then their **Collection** from Discogs, with their own token, as one job at queue priority 5. It writes nothing until every page is in, then in one transaction mirrors both lists, hides every release on either, deletes the release fade on each, and fades the master of each (unless the collector already did) so that every other version fades too. A release that leaves both lists loses its hidden row; the master fade stays. A failed sync leaves the previous data as it was. See `docs/adr/0009-collection-wantlist-sync.md`.
 _Avoid_: Import, scan, refresh
 
+## Digital stores
+
+**Digital store**:
+A place a release can be bought digitally: Bandcamp now, Traxsource or Beatport possibly later. Each is an adapter behind one check (`src/digital/`, `docs/adr/0011-digital-store-strategy.md`). Fader has no sellers, so a digital store is somewhere to look and nothing more.
+_Avoid_: Shop, seller, marketplace, source
+
+**Digital match**:
+What checking one release against one **Digital store** found, stored once per release and store and shared by every collector (`digital_matches`): `album` (the release is there, with the album's URL), `tracks` (some of its tracks are, each with its Discogs position, title and URL, beside how many tracks were searched) or `none` (kept so a rescan can skip it). A hit counts when its title matches (ignoring case, accents, punctuation and a trailing "(Original Mix)") and its artist is one of the release's. Only a wantlist item with a `releases` row can be checked; an **Unmatched** one is skipped. fader-ui#160.
+_Avoid_: Availability (that is Discogs copies for sale), stock, listing, release on Bandcamp
+
+**Digital scan**:
+A run that checks the wantlist items against a **Digital store**, one request at a time, 1.2 s apart. A single item can be checked on its own from its card (fader-ui#160); a scan of the whole wantlist is fader-ui#161.
+_Avoid_: Crawl, index
+
+**Store session**:
+The curl a collector pasted from their browser, parsed into the headers and cookies a **Digital store** is searched with, kept in memory for 24 hours per collector and store and never stored on disk. The login cookies are dropped: searching needs no login. When the store refuses it (a bot challenge or a 403), the collector pastes a fresh one.
+_Avoid_: Login, credentials, cookie jar
+
 ## Who uses it
 
 **Saved filter**:

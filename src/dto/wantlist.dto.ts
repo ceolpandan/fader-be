@@ -1,4 +1,5 @@
 import type { ReleaseArtistStub, ReleaseFormat } from "../db/schema";
+import type { DigitalMatchDto } from "./digital.dto";
 
 /** A row of `GET /wantlist`: a wantlist item that has a `releases` row. */
 export interface WantlistItemDto {
@@ -17,6 +18,8 @@ export interface WantlistItemDto {
   thumb: string | null;
   /** ISO 8601 time the collector added it on Discogs; null when Discogs did not say. */
   addedAt: string | null;
+  /** What checking the release against each digital store found; a store not checked yet has no entry. */
+  digitalMatches: DigitalMatchDto[];
 }
 
 export interface WantlistPageDto {
