@@ -68,7 +68,13 @@ export function createDiscogsTokenRouter(deps: DiscogsTokenRouterDeps): Router {
     // The cached profile belongs to the token it was fetched with, and so does the account's currency
     // (read again by the next release fetch, fader-ui#154).
     deps.db.delete(discogsProfiles).where(eq(discogsProfiles.uid, uid)).run();
-    const values = { tokenEncrypted: encryptToken(token), username, currency: null, createdAt: new Date() };
+    const values = {
+      tokenEncrypted: encryptToken(token),
+      username,
+      currency: null,
+      currencyCheckedAt: null,
+      createdAt: new Date(),
+    };
     deps.db
       .insert(discogsTokens)
       .values({ uid, ...values })

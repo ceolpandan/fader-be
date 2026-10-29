@@ -126,6 +126,7 @@ table discogs_tokens {
   token_encrypted text [not null]
   username text [not null]
   currency text
+  currency_checked_at integer
   created_at integer [not null]
 }
 

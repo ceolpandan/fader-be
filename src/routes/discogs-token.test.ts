@@ -110,11 +110,11 @@ describe("discogs token", () => {
 
     it("forgets the account's currency when a new token is saved, since it may be another account's", async () => {
       await asUser(app, "u1").put("/settings/discogs-token").send({ token: "first" });
-      db.update(discogsTokens).set({ currency: "EUR" }).run();
+      db.update(discogsTokens).set({ currency: "EUR", currencyCheckedAt: new Date() }).run();
 
       await asUser(app, "u1").put("/settings/discogs-token").send({ token: "second" });
 
-      expect(db.select().from(discogsTokens).get()?.currency).toBeNull();
+      expect(db.select().from(discogsTokens).get()).toMatchObject({ currency: null, currencyCheckedAt: null });
     });
 
     it("keeps each collector's token separate", async () => {
