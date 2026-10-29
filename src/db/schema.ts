@@ -130,6 +130,18 @@ export const releaseFormats = sqliteTable(
   ],
 );
 
+/**
+ * The Discogs response an enrichment fetched for a release, kept whole (minus `images`,
+ * `master_url` and every `resource_url`) as JSON text, so a field can become a filter later
+ * without refetching. One row per release, overwritten on each enrichment; a release with no row
+ * has not been stored yet. Query it with `json_extract`.
+ */
+export const releaseRaw = sqliteTable("release_raw", {
+  releaseId: integer("release_id").primaryKey(),
+  body: text("body").notNull(),
+  fetchedAt: integer("fetched_at", { mode: "timestamp" }).notNull(),
+});
+
 export const FILTER_OPTION_KINDS = ["genre", "style", "format", "country"] as const;
 export type FilterOptionKind = (typeof FILTER_OPTION_KINDS)[number];
 

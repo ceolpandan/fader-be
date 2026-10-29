@@ -1,11 +1,12 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { enrichmentNotFound, enrichmentRuns, releases } from "../db/schema";
+import { enrichmentNotFound, enrichmentRuns, releaseRaw, releases } from "../db/schema";
 import type { ReleaseDetailPayload } from "../db/schema";
 import { DiscogsNotFoundError } from "../discogs-client";
 import { MAX_ATTEMPTS, NonRetryableError, type JobHandler } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
 import { mapDiscogsReleaseToRow } from "./release-mapper";
+import { stripReleaseBody } from "./release-raw";
 
 export interface ReleaseDetailHandlerDeps {
   db: Db;
@@ -18,7 +19,8 @@ export interface ReleaseDetailHandlerDeps {
 export class ReleaseMissingError extends NonRetryableError {}
 
 /**
- * Fetches one release from Discogs and stores it with its rating, clearing a missing mark. A
+ * Fetches one release from Discogs and stores it with its rating, clearing a missing mark, and
+ * keeps the whole response in `release_raw` (fader-ui#149). A
  * Discogs 404 is retried like any failure (the queue allows MAX_ATTEMPTS tries); on the last one
  * the release is marked missing and noted on the run. An inline refresh (`once`) does not retry.
  */
@@ -40,8 +42,27 @@ export function createReleaseDetailHandler(deps: ReleaseDetailHandlerDeps): JobH
     }
 
     const row = mapDiscogsReleaseToRow(raw, new Date());
-    deps.db.insert(releases).values(row).onConflictDoUpdate({ target: releases.id, set: row }).run();
+    deps.db.transaction(() => {
+      deps.db.insert(releases).values(row).onConflictDoUpdate({ target: releases.id, set: row }).run();
+      storeRaw(deps.db, raw, row.enrichedAt!);
+    });
   };
+}
+
+/** Keeps the response in `release_raw`, unless Discogs reports no change since the stored copy. */
+function storeRaw(db: Db, raw: DiscogsRelease, fetchedAt: Date): void {
+  if (raw.date_changed !== undefined) {
+    const stored = db
+      .select({
+        dateChanged: sql<string | null>`json_extract(${releaseRaw.body}, '$.date_changed')`,
+      })
+      .from(releaseRaw)
+      .where(eq(releaseRaw.releaseId, raw.id))
+      .get();
+    if (stored?.dateChanged === raw.date_changed) return;
+  }
+  const values = { releaseId: raw.id, body: stripReleaseBody(raw), fetchedAt };
+  db.insert(releaseRaw).values(values).onConflictDoUpdate({ target: releaseRaw.releaseId, set: values }).run();
 }
 
 function markMissing(db: Db, runId: string, releaseId: number): void {

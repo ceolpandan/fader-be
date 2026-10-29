@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { enrichmentNotFound, enrichmentRuns, releases } from "../db/schema";
+import { enrichmentNotFound, enrichmentRuns, releaseRaw, releases } from "../db/schema";
 import { DiscogsNotFoundError, DiscogsTransientError } from "../discogs-client";
 import { NonRetryableError } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
@@ -22,7 +22,14 @@ describe("release_detail handler", () => {
     migrate(db, { migrationsFolder: "./drizzle" });
     getRelease.mockReset();
     db.insert(releases)
-      .values({ id: 1, title: "Old title", genres: [], styles: [], formats: [], artists: [] })
+      .values({
+        id: 1,
+        title: "Old title",
+        genres: [],
+        styles: [],
+        formats: [],
+        artists: [],
+      })
       .run();
     db.insert(enrichmentRuns)
       .values({
@@ -63,7 +70,10 @@ describe("release_detail handler", () => {
     }) as DiscogsRelease;
 
   it("stores the release with its rating, using the collector's token, and clears a missing mark", async () => {
-    db.update(releases).set({ missingAt: new Date(5) }).where(eq(releases.id, 1)).run();
+    db.update(releases)
+      .set({ missingAt: new Date(5) })
+      .where(eq(releases.id, 1))
+      .run();
     getRelease.mockResolvedValue(discogsRelease());
 
     await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
@@ -100,11 +110,19 @@ describe("release_detail handler", () => {
   });
 
   it("stores the cover thumbnail and the lowest price", async () => {
-    getRelease.mockResolvedValue(discogsRelease({ thumb: "https://i.discogs.com/t.jpg", lowest_price: 12.5 }));
+    getRelease.mockResolvedValue(
+      discogsRelease({
+        thumb: "https://i.discogs.com/t.jpg",
+        lowest_price: 12.5,
+      }),
+    );
 
     await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
 
-    expect(row()).toMatchObject({ thumb: "https://i.discogs.com/t.jpg", lowestPrice: 12.5 });
+    expect(row()).toMatchObject({
+      thumb: "https://i.discogs.com/t.jpg",
+      lowestPrice: 12.5,
+    });
   });
 
   it("stores no thumbnail for an empty one, and no price for a release Discogs sent none for", async () => {
@@ -145,6 +163,83 @@ describe("release_detail handler", () => {
     expect(row().enrichedAt).not.toBeNull();
   });
 
+  describe("release_raw", () => {
+    const raw = () => db.select().from(releaseRaw).where(eq(releaseRaw.releaseId, 1)).get();
+
+    it("stores the stripped response with when it was fetched, in the same step as the row", async () => {
+      getRelease.mockResolvedValue(
+        discogsRelease({
+          notes: "Hello",
+          date_changed: "2024-01-01",
+          master_url: "https://x/m",
+          images: [],
+        }),
+      );
+
+      await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+      const body = JSON.parse(raw()!.body) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        id: 1,
+        notes: "Hello",
+        date_changed: "2024-01-01",
+      });
+      expect(body).not.toHaveProperty("master_url");
+      expect(body).not.toHaveProperty("images");
+      expect(raw()!.body).not.toContain("resource_url");
+      expect(raw()!.fetchedAt).toEqual(row().enrichedAt);
+    });
+
+    it("overwrites the stored response when date_changed differs", async () => {
+      getRelease.mockResolvedValueOnce(discogsRelease({ date_changed: "2024-01-01", notes: "old" }));
+      await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+      getRelease.mockResolvedValueOnce(discogsRelease({ date_changed: "2024-02-02", notes: "new" }));
+      await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+      expect(JSON.parse(raw()!.body)).toMatchObject({
+        date_changed: "2024-02-02",
+        notes: "new",
+      });
+      expect(db.select().from(releaseRaw).all()).toHaveLength(1);
+    });
+
+    it("skips the write when date_changed equals the stored one, but still updates the row", async () => {
+      getRelease.mockResolvedValueOnce(discogsRelease({ date_changed: "2024-01-01", notes: "first" }));
+      await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+      const first = raw()!;
+      getRelease.mockResolvedValueOnce(
+        discogsRelease({
+          title: "Newer title",
+          date_changed: "2024-01-01",
+          notes: "second",
+        }),
+      );
+      await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+      expect(raw()).toEqual(first);
+      expect(row().title).toBe("Newer title");
+    });
+
+    it("writes when the response has no date_changed", async () => {
+      getRelease.mockResolvedValueOnce(discogsRelease({ notes: "first" }));
+      await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+      getRelease.mockResolvedValueOnce(discogsRelease({ notes: "second" }));
+      await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+      expect(JSON.parse(raw()!.body)).toMatchObject({ notes: "second" });
+    });
+
+    it("stores nothing for a release Discogs no longer has", async () => {
+      getRelease.mockRejectedValue(new DiscogsNotFoundError("gone"));
+
+      await expect(
+        handler()({ uid: "u1", releaseId: 1, once: true }, { runId: "run1", jobId: 1 }),
+      ).rejects.toBeInstanceOf(ReleaseMissingError);
+
+      expect(raw()).toBeUndefined();
+    });
+  });
+
   it("fails without a token", async () => {
     await expect(handler()({ uid: "no-token", releaseId: 1 }, { runId: "run1", jobId: 1 })).rejects.toBeInstanceOf(
       NonRetryableError,
@@ -161,9 +256,9 @@ describe("release_detail handler", () => {
       );
       expect(row().missingAt).toBeNull();
     }
-    await expect(handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1, attempt: 3 })).rejects.toBeInstanceOf(
-      ReleaseMissingError,
-    );
+    await expect(
+      handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1, attempt: 3 }),
+    ).rejects.toBeInstanceOf(ReleaseMissingError);
 
     expect(row().missingAt).toBeInstanceOf(Date);
     expect(db.select().from(enrichmentNotFound).all()).toEqual([{ runId: "run1", releaseId: 1 }]);
