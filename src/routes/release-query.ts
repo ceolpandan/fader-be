@@ -82,10 +82,14 @@ function styleCombinationsFilter(groups: { include: string[][]; only: string[][]
 /** Each `styleCombo` occurrence as a list of styles; empty ones dropped, identical ones (in any order) deduped. */
 function parseStyleCombinations(value: unknown): string[][] {
   const occurrences = Array.isArray(value) ? value : [value];
+  return dedupeCombinations(occurrences.map((occurrence) => parseCommaSeparated(occurrence)));
+}
+
+function dedupeCombinations(candidates: string[][]): string[][] {
   const seen = new Set<string>();
   const combinations: string[][] = [];
-  for (const occurrence of occurrences) {
-    const styles = [...new Set(parseCommaSeparated(occurrence))];
+  for (const candidate of candidates) {
+    const styles = [...new Set(candidate)];
     if (styles.length === 0) continue;
     const key = JSON.stringify([...styles].sort());
     if (seen.has(key)) continue;
@@ -258,7 +262,11 @@ export function parseReleaseQuery(
   if (search.length > 0) filters.push(searchFilter(search));
   if (scrape.value !== undefined) filters.push(scrapeFilter(scrape.value, uid));
   if (genre.length > 0) filters.push(hasAny("genre", genre));
-  if (style.length > 0) filters.push(hasAny("style", style));
+  // With include combinations given, the included styles join them as one-style combinations (an OR);
+  // without, they stay a plain filter, which the facets count.
+  const includeCombinations = parseStyleCombinations(req.query.styleCombo);
+  const mergeStyles = style.length > 0 && includeCombinations.length > 0;
+  if (style.length > 0 && !mergeStyles) filters.push(hasAny("style", style));
   if (format.length > 0) filters.push(hasAny("format", format));
   if (onlyGenre.length > 0) filters.push(hasOnly("genre", onlyGenre));
   if (onlyStyle.length > 0) filters.push(hasOnly("style", onlyStyle));
@@ -291,7 +299,7 @@ export function parseReleaseQuery(
   }
 
   const styleCombinations = styleCombinationsFilter({
-    include: parseStyleCombinations(req.query.styleCombo),
+    include: mergeStyles ? dedupeCombinations([...style.map((s) => [s]), ...includeCombinations]) : includeCombinations,
     only: parseStyleCombinations(req.query.onlyStyleCombo),
     exclude: parseStyleCombinations(req.query.excludeStyleCombo),
   });

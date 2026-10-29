@@ -143,6 +143,20 @@ describe("wantlist", () => {
     expect((await asUser(app, "u1").get("/wantlist?hideNoneForSale=false")).body.total).toBe(4);
   });
 
+  it("searches the title and artist names, every word, ignoring case, with the tab count unfiltered", async () => {
+    expect(ids((await asUser(app, "u1").get("/wantlist?q=scarce")).body)).toEqual([2]);
+    const byArtist = await asUser(app, "u1").get("/wantlist?q=%20MID%20");
+    expect(ids(byArtist.body)).toEqual([4, 2]);
+    expect(byArtist.body).toMatchObject({ total: 2, wantlistCount: 4 });
+    expect(ids((await asUser(app, "u1").get("/wantlist?q=mid%20scar")).body)).toEqual([2]);
+    expect(ids((await asUser(app, "u1").get("/wantlist?q=%25")).body)).toEqual([]);
+    expect((await asUser(app, "u1").get("/wantlist?q=")).body.total).toBe(4);
+  });
+
+  it("rejects a search that is too long", async () => {
+    expect((await asUser(app, "u1").get(`/wantlist?q=${"a".repeat(101)}`)).status).toBe(400);
+  });
+
   it("sorts by date added (newest first, undated last), artist and title", async () => {
     expect(ids((await asUser(app, "u1").get("/wantlist?sort=-addedAt")).body)).toEqual([2, 4, 1, 3]);
     expect(ids((await asUser(app, "u1").get("/wantlist?sort=artist")).body)).toEqual([3, 2, 4, 1]);

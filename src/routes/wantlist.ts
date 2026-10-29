@@ -23,6 +23,7 @@ const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 const UNMATCHED_SOURCE = "Discogs wantlist";
 
+const MAX_SEARCH_LENGTH = 100;
 const SORTS = ["numForSale", "-addedAt", "artist", "title"] as const;
 type WantlistSort = (typeof SORTS)[number];
 
@@ -107,7 +108,20 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
       }
     }
 
+    const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (req.query.q !== undefined && (typeof req.query.q !== "string" || search.length > MAX_SEARCH_LENGTH)) {
+      res.status(400).json({ error: `q must be text of at most ${MAX_SEARCH_LENGTH} characters` });
+      return;
+    }
+
     const conditions: SQL[] = [eq(wantlistItems.uid, uid)];
+    // Every word must be in the title or in one of the artist names, in any order, ignoring case.
+    for (const word of search.split(/\s+/).filter(Boolean)) {
+      const pattern = `%${word.replace(/[\\%_]/g, "\\$&")}%`;
+      conditions.push(
+        sql`(${releases.title} LIKE ${pattern} ESCAPE '\\' OR EXISTS (SELECT 1 FROM json_each(${releases.artists}) WHERE json_extract(value, '$.name') LIKE ${pattern} ESCAPE '\\'))`,
+      );
+    }
     // Items with no count yet stay: only a count of 0 is "none for sale".
     if (hideNone) conditions.push(sql`(${releases.numForSale} IS NULL OR ${releases.numForSale} > 0)`);
     if (folderId !== undefined) {
