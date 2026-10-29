@@ -1,0 +1,126 @@
+{
+  "id": 1096326,
+  "status": "Accepted",
+  "year": 1993,
+  "uri": "https://www.discogs.com/release/1096326-Auditiv-Experience-Time-Scape",
+  "artists": [
+    {
+      "name": "Auditiv Experience",
+      "anv": "",
+      "join": "",
+      "role": "",
+      "tracks": "",
+      "id": 28001
+    }
+  ],
+  "artists_sort": "Auditiv Experience",
+  "labels": [
+    {
+      "name": "Resonance (5)",
+      "catno": "Resonance 004",
+      "entity_type": "1",
+      "entity_type_name": "Label",
+      "id": 185627,
+      "thumbnail_url": "https://i.discogs.com/TUK4WwfyvVM2U-OJje4Gx3sk-M74NTcEUXOX4toFs_U/rs:fit/g:sm/q:90/h:423/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTE4NTYy/Ny0xNzE5MjI4NDk4/LTYwODIuanBlZw.jpeg"
+    }
+  ],
+  "series": [],
+  "companies": [],
+  "formats": [
+    {
+      "name": "Vinyl",
+      "qty": "1",
+      "descriptions": [
+        "12\"",
+        "Limited Edition"
+      ],
+      "text": "Brown"
+    }
+  ],
+  "data_quality": "Correct",
+  "community": {
+    "have": 16,
+    "want": 310,
+    "rating": {
+      "count": 6,
+      "average": 4.33
+    },
+    "submitter": {
+      "username": "mayday"
+    },
+    "contributors": [
+      {
+        "username": "mayday"
+      },
+      {
+        "username": "KWOCR"
+      },
+      {
+        "username": "8m2stereo"
+      }
+    ],
+    "data_quality": "Correct",
+    "status": "Accepted"
+  },
+  "format_quantity": 1,
+  "date_added": "2007-10-08T05:09:26-07:00",
+  "date_changed": "2010-03-06T04:14:51-08:00",
+  "num_for_sale": 0,
+  "lowest_price": null,
+  "master_id": 19573,
+  "title": "Time Scape",
+  "country": "Belgium",
+  "released": "1993",
+  "notes": "First pressing brown vinyl.\r\nAll tracks enregistered by Stiff Clarke's Telescope.\r\nMix F.L Productions. Enregistered in Manchester.\r\nVinyl etchings read 'Resonance 3000'. Catalog on label reads \"Resonance 004 Promo\".\n",
+  "released_formatted": "1993",
+  "identifiers": [],
+  "videos": [
+    {
+      "uri": "https://www.youtube.com/watch?v=trMgsyXHrPM",
+      "title": "Auditiv Experience – Time Scape (1993)",
+      "description": "1. Untitled 00:00\n2. Untitled 16:24\n\nResonance – CD 3001\nhttps://www.discogs.com/release/240768-Auditiv-Experience-Time-Scape",
+      "duration": 0,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=59xNm5GoECg",
+      "title": "Auditiv Experience - Resonance",
+      "description": "From the ep Time Scape\n\n1993",
+      "duration": 0,
+      "embed": true
+    },
+    {
+      "uri": "https://www.youtube.com/watch?v=3eueU_SH3AE",
+      "title": "Auditiv Experience - Untitled",
+      "description": "Resonance, 1993\n-------------------------------------------------------------------------------------------\nhttps://soundcloud.com/success-stories-ffm\nhttps://www.facebook.com/successstories.ffm",
+      "duration": 0,
+      "embed": true
+    }
+  ],
+  "genres": [
+    "Electronic"
+  ],
+  "styles": [
+    "Abstract",
+    "Techno",
+    "Ambient"
+  ],
+  "tracklist": [
+    {
+      "position": "A",
+      "type_": "track",
+      "title": "Untitled",
+      "duration": ""
+    },
+    {
+      "position": "B",
+      "type_": "track",
+      "title": "Untitled",
+      "duration": ""
+    }
+  ],
+  "thumb": "https://i.discogs.com/oJU-8Nit3sPkt6n0vaL3PP4-gtih2JlUatqTEeshrA4/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTEwOTYz/MjYtMTE5MTc1MTY1/MC5qcGVn.jpeg",
+  "estimated_weight": 230,
+  "blocked_from_sale": false,
+  "is_offensive": false
+}

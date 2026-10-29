@@ -9,6 +9,7 @@ import { enrichmentNotFound, enrichmentRuns, releaseRaw, releases } from "../db/
 import { DiscogsNotFoundError, DiscogsTransientError } from "../discogs-client";
 import { NonRetryableError } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
+import { loadReleaseFixture } from "./__fixtures__/release-fixtures";
 import { createReleaseDetailHandler, ReleaseMissingError } from "./release-detail-handler";
 
 describe("release_detail handler", () => {
@@ -227,6 +228,17 @@ describe("release_detail handler", () => {
       await handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
 
       expect(JSON.parse(raw()!.body)).toMatchObject({ notes: "second" });
+    });
+
+    it("stores a real response as valid JSON equal to its reviewed stripped form", async () => {
+      const { raw: fixture, stripped } = loadReleaseFixture(1894284);
+      getRelease.mockResolvedValue(fixture);
+
+      await handler()({ uid: "u1", releaseId: 1894284 }, { runId: "wantlist-availability:u1", jobId: 1 });
+
+      const stored = db.select().from(releaseRaw).where(eq(releaseRaw.releaseId, 1894284)).get()!;
+      expect(typeof stored.body).toBe("string");
+      expect(JSON.parse(stored.body)).toEqual(stripped);
     });
 
     it("stores nothing for a release Discogs no longer has", async () => {
