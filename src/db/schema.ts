@@ -65,6 +65,8 @@ export const releases = sqliteTable(
     numForSaleAt: integer("num_for_sale_at", { mode: "timestamp" }),
     /** The cheapest current price on Discogs, in the fetching account's currency; null until enriched with it. */
     lowestPrice: real("lowest_price"),
+    /** The currency code of `lowestPrice` (the fetching collector's, e.g. "EUR"); null when there is no price or it is not known (fader-ui#154). */
+    lowestPriceCurrency: text("lowest_price_currency"),
     /** The release's cover thumbnail URL on Discogs; null until enriched, or when Discogs has none. */
     thumb: text("thumb"),
     /** When an enrichment run last refreshed the row from the Discogs API. */
@@ -266,6 +268,8 @@ export const discogsTokens = sqliteTable("discogs_tokens", {
   uid: text("uid").primaryKey(),
   tokenEncrypted: text("token_encrypted").notNull(),
   username: text("username").notNull(),
+  /** The marketplace currency of the Discogs account (`curr_abbr`), read on the first release fetch; null until then and after a new token is saved. */
+  currency: text("currency"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 

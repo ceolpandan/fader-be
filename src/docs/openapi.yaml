@@ -1877,7 +1877,7 @@ components:
 
     WantlistItemDto:
       type: object
-      required: [releaseId, title, year, formats, artists, numForSale, lowestPrice, thumb, addedAt]
+      required: [releaseId, title, year, formats, artists, numForSale, lowestPrice, lowestPriceCurrency, thumb, addedAt]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -1896,7 +1896,11 @@ components:
         lowestPrice:
           type: number
           nullable: true
-          description: The cheapest current price on Discogs when the release was last fetched; null until then.
+          description: The cheapest current price on Discogs when the release was last fetched, in lowestPriceCurrency; null until then, or when it was not in euro.
+        lowestPriceCurrency:
+          type: string
+          nullable: true
+          description: The currency of lowestPrice, always "EUR" for now; null when there is no price.
         thumb:
           type: string
           nullable: true
@@ -2399,7 +2403,7 @@ components:
       type: object
       description: >
         Served from our own database.
-      required: [id, title, year, country, thumb, lowestPrice, artists, labels, tracklist, videos]
+      required: [id, title, year, country, thumb, lowestPrice, lowestPriceCurrency, artists, labels, tracklist, videos]
       properties:
         id: { type: integer }
         title: { type: string }
@@ -2412,7 +2416,11 @@ components:
         lowestPrice:
           type: number
           nullable: true
-          description: The cheapest current price on Discogs when the release was last fetched; null until then.
+          description: The cheapest current price on Discogs when the release was last fetched, in lowestPriceCurrency; null until then, or when it was not in euro.
+        lowestPriceCurrency:
+          type: string
+          nullable: true
+          description: The currency of lowestPrice, always "EUR" for now; null when there is no price.
         genres:
           type: array
           items: { type: string }

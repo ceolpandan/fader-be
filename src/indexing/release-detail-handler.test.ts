@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createDb, type Db } from "../db/client";
-import { enrichmentNotFound, enrichmentRuns, releaseRaw, releases } from "../db/schema";
+import { discogsTokens, enrichmentNotFound, enrichmentRuns, releaseRaw, releases } from "../db/schema";
 import { DiscogsNotFoundError, DiscogsTransientError } from "../discogs-client";
 import { NonRetryableError } from "../queue/discogs-queue";
 import type { DiscogsRelease } from "../types/discogs-api";
@@ -16,8 +16,10 @@ describe("release_detail handler", () => {
   let dbPath: string;
   let db: Db;
   const getRelease = vi.fn<(id: number, token: string) => Promise<DiscogsRelease>>();
+  const getCurrency = vi.fn<(username: string, token: string) => Promise<string | null>>();
 
   beforeEach(() => {
+    getCurrency.mockReset();
     dbPath = path.join(os.tmpdir(), `fader-test-${Date.now()}-${Math.random()}.sqlite`);
     db = createDb(dbPath);
     migrate(db, { migrationsFolder: "./drizzle" });
@@ -58,6 +60,7 @@ describe("release_detail handler", () => {
       db,
       getToken: (uid) => (uid === "no-token" ? null : `token-${uid}`),
       getRelease,
+      getCurrency,
     });
   const row = () => db.select().from(releases).where(eq(releases.id, 1)).get()!;
   const discogsRelease = (overrides: Partial<DiscogsRelease> = {}) =>
@@ -108,6 +111,72 @@ describe("release_detail handler", () => {
 
     expect(row().numForSale).toBeNull();
     expect(row().numForSaleAt).toBeInstanceOf(Date);
+  });
+
+  describe("price currency (fader-ui#154)", () => {
+    const saveToken = (currency: string | null = null) =>
+      db
+        .insert(discogsTokens)
+        .values({ uid: "u1", tokenEncrypted: "x", username: "alice", currency, createdAt: new Date() })
+        .run();
+    const tokenCurrency = () => db.select().from(discogsTokens).where(eq(discogsTokens.uid, "u1")).get()?.currency;
+    const run = () => handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
+
+    it("asks Discogs for the account's currency once, keeps it on the token and stores it with the price", async () => {
+      saveToken();
+      getCurrency.mockResolvedValue("EUR");
+      getRelease.mockResolvedValue(discogsRelease({ lowest_price: 12.5 }));
+
+      await run();
+      await run();
+
+      expect(getCurrency).toHaveBeenCalledTimes(1);
+      expect(getCurrency).toHaveBeenCalledWith("alice", "token-u1");
+      expect(tokenCurrency()).toBe("EUR");
+      expect(row()).toMatchObject({ lowestPrice: 12.5, lowestPriceCurrency: "EUR" });
+    });
+
+    it("stores the currency the token already has, without asking Discogs", async () => {
+      saveToken("USD");
+      getRelease.mockResolvedValue(discogsRelease({ lowest_price: 12.5 }));
+
+      await run();
+
+      expect(getCurrency).not.toHaveBeenCalled();
+      expect(row()).toMatchObject({ lowestPrice: 12.5, lowestPriceCurrency: "USD" });
+    });
+
+    it("stores no currency for a release with no price, and replaces a stale one", async () => {
+      saveToken("EUR");
+      db.update(releases).set({ lowestPrice: 3, lowestPriceCurrency: "EUR" }).where(eq(releases.id, 1)).run();
+      getRelease.mockResolvedValue(discogsRelease());
+
+      await run();
+
+      expect(row()).toMatchObject({ lowestPrice: null, lowestPriceCurrency: null });
+    });
+
+    it("stores the price with no currency when Discogs does not say, and asks again next time", async () => {
+      saveToken();
+      getCurrency.mockResolvedValue(null);
+      getRelease.mockResolvedValue(discogsRelease({ lowest_price: 12.5 }));
+
+      await run();
+
+      expect(tokenCurrency()).toBeNull();
+      expect(row()).toMatchObject({ lowestPrice: 12.5, lowestPriceCurrency: null });
+    });
+
+    it("does not ask for the currency of a release Discogs no longer has", async () => {
+      saveToken();
+      getRelease.mockRejectedValue(new DiscogsNotFoundError("gone"));
+
+      await expect(
+        handler()({ uid: "u1", releaseId: 1, once: true }, { runId: "inline-x", jobId: 1, attempt: 1 }),
+      ).rejects.toBeInstanceOf(ReleaseMissingError);
+
+      expect(getCurrency).not.toHaveBeenCalled();
+    });
   });
 
   it("stores the cover thumbnail and the lowest price", async () => {

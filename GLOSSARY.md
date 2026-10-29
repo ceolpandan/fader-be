@@ -93,7 +93,7 @@ How many copies of a release are for sale on Discogs (`num_for_sale`). The wantl
 _Avoid_: Stock, inventory, listings
 
 **Lowest price**:
-The cheapest current price for a release on Discogs (`lowest_price`), a plain number in the currency of the account whose token fetched it. Stored on the release by the same fetch as **Availability**; null when Discogs sent none. Fader has no sellers, so it is a number and nothing more.
+The cheapest current price for a release on Discogs (`lowest_price`). Discogs prices `GET /releases/{id}` in the marketplace currency of the account whose token fetched it and ignores `curr_abbr` there, so the fetch stores that currency's code next to the price (`lowest_price_currency`), read once from the account's profile (`curr_abbr`) and kept on `discogs_tokens.currency`. Stored by the same fetch as **Availability**; null when Discogs sent none. Fader shows every price in one currency, euro (`PRICE_CURRENCY`): the API returns `lowestPrice` only when the stored currency is EUR, with `lowestPriceCurrency`, and null otherwise, never a number in another or an unknown currency (fader-ui#154). Fader has no sellers, so it is a number and a currency and nothing more.
 _Avoid_: Price, cost, asking price
 
 **Cover**:

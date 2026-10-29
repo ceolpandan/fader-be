@@ -4,6 +4,7 @@ import type { Db } from "../db/client";
 import { getDiscogsToken } from "../db/discogs-tokens";
 import { releases, wantlistFolderItems, wantlistItems } from "../db/schema";
 import { DiscogsAuthError } from "../discogs-client";
+import { shownPrice } from "../dto/price";
 import type {
   WantlistItemDto,
   WantlistPageDto,
@@ -146,6 +147,7 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
         artists: releases.artists,
         numForSale: releases.numForSale,
         lowestPrice: releases.lowestPrice,
+        lowestPriceCurrency: releases.lowestPriceCurrency,
         thumb: releases.thumb,
         addedAt: wantlistItems.addedAt,
       })
@@ -157,7 +159,11 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
       .offset((paging.page - 1) * paging.pageSize)
       .all();
 
-    const items: WantlistItemDto[] = rows.map((row) => ({ ...row, addedAt: row.addedAt?.toISOString() ?? null }));
+    const items: WantlistItemDto[] = rows.map((row) => ({
+      ...row,
+      ...shownPrice(row.lowestPrice, row.lowestPriceCurrency),
+      addedAt: row.addedAt?.toISOString() ?? null,
+    }));
     const updatedAt = db
       .select({ at: max(releases.numForSaleAt) })
       .from(wantlistItems)

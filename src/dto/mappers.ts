@@ -1,6 +1,7 @@
 import type { releases } from "../db/schema";
 import type { DiscogsMaster } from "../types/discogs-api";
 import type { MasterDetailDto } from "./master-detail.dto";
+import { shownPrice } from "./price";
 import type { ReleaseDetailDto } from "./release-detail.dto";
 
 export function mapReleaseRowToDto(row: typeof releases.$inferSelect): ReleaseDetailDto {
@@ -10,7 +11,7 @@ export function mapReleaseRowToDto(row: typeof releases.$inferSelect): ReleaseDe
     year: row.year,
     country: row.country,
     thumb: row.thumb,
-    lowestPrice: row.lowestPrice,
+    ...shownPrice(row.lowestPrice, row.lowestPriceCurrency),
     genres: row.genres,
     styles: row.styles,
     artists: row.artists,

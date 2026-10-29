@@ -90,6 +90,15 @@ export function getIdentity(token: string) {
   return discogsGet<{ id: number; username: string }>("/oauth/identity", token);
 }
 
+/**
+ * The marketplace currency of the collector's Discogs account (`curr_abbr`, e.g. "EUR"): the one
+ * `GET /releases/{id}` prices in, whatever `curr_abbr` it is given. Null when Discogs sent none.
+ */
+export async function getUserCurrency(username: string, token: string): Promise<string | null> {
+  const profile = await discogsGet<{ curr_abbr?: string }>(`/users/${encodeURIComponent(username)}`, token);
+  return profile.curr_abbr || null;
+}
+
 /** The copies in the collector's collection (Discogs' "All" folder, id 0), duplicates counted. */
 export async function getCollectionCount(username: string, token: string): Promise<number> {
   const folder = await discogsGet<{ count: number }>(
