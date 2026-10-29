@@ -56,6 +56,10 @@ _Avoid_: Re-index, force
 A release an enrichment run has fetched from the Discogs API (it has an `enriched_at`). `enriched=only` on the release list keeps only these. The filter options are not narrowed to them: the Enriched page offers the same static list as Explore (fader-ui#112).
 _Avoid_: Rated release, indexed release
 
+**Raw release**:
+The Discogs response an enrichment fetch got for a release, kept whole as JSON text in `release_raw` (without `images`, `master_url` and any `resource_url`) so a field can become a filter later without refetching. One row per release, overwritten by the next enrichment unless Discogs's `date_changed` is unchanged; no row means the release has not been stored yet (fader-ui#149).
+_Avoid_: Cache, snapshot, payload
+
 **Missing release**:
 A release an enrichment run found Discogs no longer has (a 404 after retries). It is marked `missing_at` and Explore hides it; a fresh enrichment clears the mark if Discogs finds it again.
 _Avoid_: Deleted release, dead release

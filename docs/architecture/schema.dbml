@@ -71,6 +71,12 @@ table release_formats {
   }
 }
 
+table release_raw {
+  release_id integer [pk, not null]
+  body text [not null]
+  fetched_at integer [not null]
+}
+
 table filter_options {
   kind text [not null]
   value text [not null]
@@ -152,6 +158,27 @@ table wantlist_items {
 
   indexes {
     (uid, release_id) [pk]
+  }
+}
+
+table wantlist_folders {
+  id integer [pk, not null, increment]
+  uid text [not null]
+  name text [not null]
+
+  indexes {
+    (uid, name) [name: 'wantlist_folders_uid_name_idx', unique]
+  }
+}
+
+table wantlist_folder_items {
+  uid text [not null]
+  release_id integer [not null]
+  folder_id integer [not null]
+
+  indexes {
+    (uid, release_id) [pk]
+    folder_id [name: 'wantlist_folder_items_folder_idx']
   }
 }
 
