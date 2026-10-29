@@ -114,12 +114,22 @@ describe("release_detail handler", () => {
   });
 
   describe("price currency (fader-ui#154)", () => {
-    const saveToken = (currency: string | null = null) =>
+    const HOUR = 60 * 60 * 1000;
+    /** A token whose currency was read `hoursAgo` hours ago (`null` currency: never read). */
+    const saveToken = (currency: string | null = null, hoursAgo = 1) =>
       db
         .insert(discogsTokens)
-        .values({ uid: "u1", tokenEncrypted: "x", username: "alice", currency, createdAt: new Date() })
+        .values({
+          uid: "u1",
+          tokenEncrypted: "x",
+          username: "alice",
+          currency,
+          currencyCheckedAt: currency ? new Date(Date.now() - hoursAgo * HOUR) : null,
+          createdAt: new Date(),
+        })
         .run();
-    const tokenCurrency = () => db.select().from(discogsTokens).where(eq(discogsTokens.uid, "u1")).get()?.currency;
+    const token = () => db.select().from(discogsTokens).where(eq(discogsTokens.uid, "u1")).get();
+    const tokenCurrency = () => token()?.currency;
     const run = () => handler()({ uid: "u1", releaseId: 1 }, { runId: "run1", jobId: 1 });
 
     it("asks Discogs for the account's currency once, keeps it on the token and stores it with the price", async () => {
@@ -136,14 +146,51 @@ describe("release_detail handler", () => {
       expect(row()).toMatchObject({ lowestPrice: 12.5, lowestPriceCurrency: "EUR" });
     });
 
-    it("stores the currency the token already has, without asking Discogs", async () => {
-      saveToken("USD");
+    it("stores the currency the token has read within the day, without asking Discogs", async () => {
+      saveToken("USD", 23);
       getRelease.mockResolvedValue(discogsRelease({ lowest_price: 12.5 }));
 
       await run();
 
       expect(getCurrency).not.toHaveBeenCalled();
       expect(row()).toMatchObject({ lowestPrice: 12.5, lowestPriceCurrency: "USD" });
+    });
+
+    it("reads the currency again once it is a day old, and follows a currency changed on Discogs", async () => {
+      saveToken("EUR", 25);
+      getCurrency.mockResolvedValue("USD");
+      getRelease.mockResolvedValue(discogsRelease({ lowest_price: 12.5 }));
+      const before = Date.now();
+
+      await run();
+
+      expect(getCurrency).toHaveBeenCalledWith("alice", "token-u1");
+      expect(tokenCurrency()).toBe("USD");
+      expect(token()!.currencyCheckedAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+      expect(row()).toMatchObject({ lowestPrice: 12.5, lowestPriceCurrency: "USD" });
+    });
+
+    it("keeps the currency when Discogs still says the same, and asks again only after another day", async () => {
+      saveToken("EUR", 25);
+      getCurrency.mockResolvedValue("EUR");
+      getRelease.mockResolvedValue(discogsRelease({ lowest_price: 12.5 }));
+
+      await run();
+      await run();
+
+      expect(getCurrency).toHaveBeenCalledTimes(1);
+      expect(row()).toMatchObject({ lowestPriceCurrency: "EUR" });
+    });
+
+    it("lets a failed currency read fail the job, so no price is stored under a stale code", async () => {
+      saveToken("EUR", 25);
+      getCurrency.mockRejectedValue(new DiscogsTransientError("down"));
+      getRelease.mockResolvedValue(discogsRelease({ lowest_price: 12.5 }));
+
+      await expect(run()).rejects.toBeInstanceOf(DiscogsTransientError);
+
+      expect(row().lowestPrice).toBeNull();
+      expect(tokenCurrency()).toBe("EUR");
     });
 
     it("stores no currency for a release with no price, and replaces a stale one", async () => {

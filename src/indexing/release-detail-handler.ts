@@ -51,22 +51,37 @@ export function createReleaseDetailHandler(deps: ReleaseDetailHandlerDeps): JobH
   };
 }
 
+/** How long the account's currency is trusted before Discogs is asked again. */
+export const CURRENCY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 /**
  * The currency `lowest_price` came in: the collector's Discogs account currency, which Discogs
- * prices a release in. It is asked of Discogs once and kept on the token (fader-ui#154); null when
- * Discogs does not say.
+ * prices a release in. It is kept on the token and read again once it is a day old, so a currency
+ * changed on Discogs is followed within a day (fader-ui#154). Prices already stored keep the code
+ * they came with. Null when Discogs does not say, in which case it is asked again next time.
  */
 async function accountCurrency(deps: ReleaseDetailHandlerDeps, uid: string, token: string): Promise<string | null> {
   const account = deps.db
-    .select({ username: discogsTokens.username, currency: discogsTokens.currency })
+    .select({
+      username: discogsTokens.username,
+      currency: discogsTokens.currency,
+      checkedAt: discogsTokens.currencyCheckedAt,
+    })
     .from(discogsTokens)
     .where(eq(discogsTokens.uid, uid))
     .get();
   if (!account) return null;
-  if (account.currency) return account.currency;
+  const now = new Date();
+  if (account.currency && account.checkedAt && now.getTime() - account.checkedAt.getTime() < CURRENCY_MAX_AGE_MS) {
+    return account.currency;
+  }
 
   const currency = await deps.getCurrency(account.username, token);
-  if (currency) deps.db.update(discogsTokens).set({ currency }).where(eq(discogsTokens.uid, uid)).run();
+  deps.db
+    .update(discogsTokens)
+    .set({ currency, currencyCheckedAt: currency ? now : null })
+    .where(eq(discogsTokens.uid, uid))
+    .run();
   return currency;
 }
 

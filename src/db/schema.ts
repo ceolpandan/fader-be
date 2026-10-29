@@ -268,8 +268,10 @@ export const discogsTokens = sqliteTable("discogs_tokens", {
   uid: text("uid").primaryKey(),
   tokenEncrypted: text("token_encrypted").notNull(),
   username: text("username").notNull(),
-  /** The marketplace currency of the Discogs account (`curr_abbr`), read on the first release fetch; null until then and after a new token is saved. */
+  /** The marketplace currency of the Discogs account (`curr_abbr`), read by a release fetch and read again once a day; null until then and after a new token is saved. */
   currency: text("currency"),
+  /** When `currency` was last read from Discogs; null while it is not known. */
+  currencyCheckedAt: integer("currency_checked_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 

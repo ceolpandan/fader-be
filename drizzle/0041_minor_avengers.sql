@@ -1,0 +1,1 @@
+ALTER TABLE `discogs_tokens` ADD `currency_checked_at` integer;

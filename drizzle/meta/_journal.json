@@ -288,6 +288,13 @@
       "when": 1793301230578,
       "tag": "0040_clammy_hercules",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1793302555945,
+      "tag": "0041_minor_avengers",
+      "breakpoints": true
     }
   ]
 }
