@@ -15,8 +15,10 @@ export interface ReleaseDetailDto {
   country: string | null;
   /** Cover thumbnail URL on Discogs; null until enriched or when Discogs has none. */
   thumb: string | null;
-  /** The cheapest current price on Discogs when the release was last fetched; null until then. */
+  /** The cheapest current price on Discogs when the release was last fetched, in `lowestPriceCurrency`; null until then, or when it was not in euro. */
   lowestPrice: number | null;
+  /** The currency of `lowestPrice` (always "EUR" for now); null when there is no price. */
+  lowestPriceCurrency: string | null;
   genres?: string[];
   styles?: string[];
   artists: ReleaseArtistStub[];

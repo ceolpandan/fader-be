@@ -42,7 +42,7 @@ describe("an enrichment run across a server restart", () => {
     queues.push(queue);
     queue.registerHandler(
       "release_detail",
-      createReleaseDetailHandler({ db, getToken: () => "token", getRelease }),
+      createReleaseDetailHandler({ db, getToken: () => "token", getRelease, getCurrency: async () => "EUR" }),
     );
     queue.onSettled((job) => finishRunWhenSettled(db, job));
     finishRunsWithNothingLeft(db);

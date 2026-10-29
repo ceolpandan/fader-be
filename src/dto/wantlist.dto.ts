@@ -9,8 +9,10 @@ export interface WantlistItemDto {
   artists: ReleaseArtistStub[];
   /** Copies for sale on Discogs when the release was last fetched; null until then. */
   numForSale: number | null;
-  /** The cheapest current price on Discogs when the release was last fetched; null until then. */
+  /** The cheapest current price on Discogs when the release was last fetched, in `lowestPriceCurrency`; null until then, or when it was not in euro. */
   lowestPrice: number | null;
+  /** The currency of `lowestPrice` (always "EUR" for now); null when there is no price. */
+  lowestPriceCurrency: string | null;
   /** Cover thumbnail URL on Discogs; null until enriched or when Discogs has none. */
   thumb: string | null;
   /** ISO 8601 time the collector added it on Discogs; null when Discogs did not say. */

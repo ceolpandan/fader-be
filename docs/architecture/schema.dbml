@@ -18,6 +18,7 @@ table releases {
   num_for_sale integer
   num_for_sale_at integer
   lowest_price real
+  lowest_price_currency text
   thumb text
   enriched_at integer
   missing_at integer
@@ -124,6 +125,7 @@ table discogs_tokens {
   uid text [pk, not null]
   token_encrypted text [not null]
   username text [not null]
+  currency text
   created_at integer [not null]
 }
 

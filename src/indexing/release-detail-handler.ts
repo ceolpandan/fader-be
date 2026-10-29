@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { enrichmentNotFound, enrichmentRuns, releaseRaw, releases } from "../db/schema";
+import { discogsTokens, enrichmentNotFound, enrichmentRuns, releaseRaw, releases } from "../db/schema";
 import type { ReleaseDetailPayload } from "../db/schema";
 import { DiscogsNotFoundError } from "../discogs-client";
 import { MAX_ATTEMPTS, NonRetryableError, type JobHandler } from "../queue/discogs-queue";
@@ -13,6 +13,8 @@ export interface ReleaseDetailHandlerDeps {
   /** The collector's Discogs token, or null when they have none (the job then fails). */
   getToken: (uid: string) => string | null;
   getRelease: (releaseId: number, token: string) => Promise<DiscogsRelease>;
+  /** The marketplace currency of the Discogs account a token belongs to; null when Discogs has none. */
+  getCurrency: (username: string, token: string) => Promise<string | null>;
 }
 
 /** Discogs no longer has the release; it is marked missing and the job ends. */
@@ -41,12 +43,31 @@ export function createReleaseDetailHandler(deps: ReleaseDetailHandlerDeps): JobH
       throw err;
     }
 
-    const row = mapDiscogsReleaseToRow(raw, new Date());
+    const row = mapDiscogsReleaseToRow(raw, new Date(), await accountCurrency(deps, uid, token));
     deps.db.transaction(() => {
       deps.db.insert(releases).values(row).onConflictDoUpdate({ target: releases.id, set: row }).run();
       storeRaw(deps.db, raw, row.enrichedAt!);
     });
   };
+}
+
+/**
+ * The currency `lowest_price` came in: the collector's Discogs account currency, which Discogs
+ * prices a release in. It is asked of Discogs once and kept on the token (fader-ui#154); null when
+ * Discogs does not say.
+ */
+async function accountCurrency(deps: ReleaseDetailHandlerDeps, uid: string, token: string): Promise<string | null> {
+  const account = deps.db
+    .select({ username: discogsTokens.username, currency: discogsTokens.currency })
+    .from(discogsTokens)
+    .where(eq(discogsTokens.uid, uid))
+    .get();
+  if (!account) return null;
+  if (account.currency) return account.currency;
+
+  const currency = await deps.getCurrency(account.username, token);
+  if (currency) deps.db.update(discogsTokens).set({ currency }).where(eq(discogsTokens.uid, uid)).run();
+  return currency;
 }
 
 /** Keeps the response in `release_raw`, unless Discogs reports no change since the stored copy. */

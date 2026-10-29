@@ -110,7 +110,10 @@ describe("wantlist", () => {
   });
 
   it("lists the enriched items fewest for sale first, items with no count last", async () => {
-    db.update(releases).set({ lowestPrice: 4.5, thumb: "https://i.discogs.com/t.jpg" }).where(eq(releases.id, 2)).run();
+    db.update(releases)
+      .set({ lowestPrice: 4.5, lowestPriceCurrency: "EUR", thumb: "https://i.discogs.com/t.jpg" })
+      .where(eq(releases.id, 2))
+      .run();
     const res = await asUser(app, "u1").get("/wantlist");
 
     expect(res.status).toBe(200);
@@ -130,9 +133,21 @@ describe("wantlist", () => {
       artists: [{ id: 20, name: "Mid" }],
       numForSale: 1,
       lowestPrice: 4.5,
+      lowestPriceCurrency: "EUR",
       thumb: "https://i.discogs.com/t.jpg",
       addedAt: "2026-03-01T00:00:00.000Z",
     });
+  });
+
+  it("shows a price only when it is in euro", async () => {
+    db.update(releases).set({ lowestPrice: 4.5, lowestPriceCurrency: "USD" }).where(eq(releases.id, 2)).run();
+    db.update(releases).set({ lowestPrice: 7, lowestPriceCurrency: null }).where(eq(releases.id, 4)).run();
+    const res = await asUser(app, "u1").get("/wantlist");
+
+    const price = (releaseId: number) =>
+      res.body.items.find((item: { releaseId: number }) => item.releaseId === releaseId);
+    expect(price(2)).toMatchObject({ lowestPrice: null, lowestPriceCurrency: null });
+    expect(price(4)).toMatchObject({ lowestPrice: null, lowestPriceCurrency: null });
   });
 
   it("hides items with none for sale, keeping those with no count yet, and counts the tab without the filter", async () => {

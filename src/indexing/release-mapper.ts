@@ -3,7 +3,12 @@ import { releases } from "../db/schema";
 import type { DiscogsRelease } from "../types/discogs-api";
 
 /** What an enrichment fetch stores for a release: the Discogs fields we keep, plus the community rating, haves and wants. */
-export function mapDiscogsReleaseToRow(raw: DiscogsRelease, enrichedAt: Date): typeof releases.$inferInsert {
+export function mapDiscogsReleaseToRow(
+  raw: DiscogsRelease,
+  enrichedAt: Date,
+  /** The fetching account's marketplace currency, which `lowest_price` is in; null when unknown. */
+  currency: string | null = null,
+): typeof releases.$inferInsert {
   return {
     id: raw.id,
     title: raw.title,
@@ -41,6 +46,7 @@ export function mapDiscogsReleaseToRow(raw: DiscogsRelease, enrichedAt: Date): t
     numForSale: raw.num_for_sale ?? null,
     numForSaleAt: enrichedAt,
     lowestPrice: raw.lowest_price ?? null,
+    lowestPriceCurrency: raw.lowest_price !== undefined && raw.lowest_price !== null ? currency : null,
     // Discogs sends "" for a release with no cover.
     thumb: raw.thumb || null,
     enrichedAt,

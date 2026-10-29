@@ -9,6 +9,7 @@ import {
   getCollectionCount,
   getCollectionPage,
   getRelease,
+  getUserCurrency,
   deleteWantlistItem,
   getWantlistCount,
   getWantlistPage,
@@ -52,7 +53,12 @@ queue.registerHandler(
 );
 queue.registerHandler(
   "release_detail",
-  createReleaseDetailHandler({ db, getToken: (uid) => getDiscogsToken(db, uid), getRelease }),
+  createReleaseDetailHandler({
+    db,
+    getToken: (uid) => getDiscogsToken(db, uid),
+    getRelease,
+    getCurrency: getUserCurrency,
+  }),
 );
 queue.registerHandler(
   "discogs_profile",
