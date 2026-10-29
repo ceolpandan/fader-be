@@ -440,6 +440,12 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(titles(res.body)).toEqual(["Minimal Ambient"]);
     });
 
+    it("ORs the included styles with the include combinations", async () => {
+      seedStyled();
+      const res = await get("/releases?style=Electro&styleCombo=Minimal,Ambient&sort=title");
+      expect(titles(res.body)).toEqual(["Electro Ambient", "Minimal Ambient", "Minimal Electro"]);
+    });
+
     it("drops empty combinations and dedupes identical ones in any order", async () => {
       seedStyled();
       const res = await get("/releases?styleCombo=&styleCombo=Electro,Minimal&styleCombo=Minimal,Electro");

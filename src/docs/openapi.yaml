@@ -1037,6 +1037,13 @@ paths:
           description: >
             "true" leaves out items that are in any folder. Not with `folderId`.
           schema: { type: boolean, default: false }
+        - name: q
+          in: query
+          description: >
+            Search text, at most 100 characters. Every word (ignoring case) must
+            be in the title or in an artist name. `total` follows it;
+            `wantlistCount` does not.
+          schema: { type: string, maxLength: 100 }
       responses:
         "200":
           description: One page of the wantlist
@@ -1045,7 +1052,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/WantlistPageDto"
         "400":
-          description: Invalid page, pageSize, sort or folderId, or both folderId and hideFoldered
+          description: Invalid page, pageSize, sort, folderId or q, or both folderId and hideFoldered
           content:
             application/json:
               schema:
@@ -1552,7 +1559,9 @@ components:
       description: >
         A style combination: comma-separated style names a release must all have.
         Repeat the parameter for several combinations; a release passes when it
-        matches any one of them.
+        matches any one of them. Styles given in `style` count as one-style
+        combinations alongside these, so a release passes when it has any of
+        those styles or matches any combination.
       style: form
       explode: true
       schema:
