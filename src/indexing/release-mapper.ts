@@ -1,3 +1,4 @@
+import { dedupeVideos } from "../db/dedupe-videos";
 import { releases } from "../db/schema";
 import type { DiscogsRelease } from "../types/discogs-api";
 
@@ -26,11 +27,13 @@ export function mapDiscogsReleaseToRow(raw: DiscogsRelease, enrichedAt: Date): t
       title: track.title,
       ...(track.duration ? { duration: track.duration } : {}),
     })),
-    videos: (raw.videos ?? []).map((video) => ({
-      src: video.uri,
-      ...(video.title ? { title: video.title } : {}),
-      ...(video.duration !== undefined ? { duration: video.duration } : {}),
-    })),
+    videos: dedupeVideos(
+      (raw.videos ?? []).map((video) => ({
+        src: video.uri,
+        ...(video.title ? { title: video.title } : {}),
+        ...(video.duration !== undefined ? { duration: video.duration } : {}),
+      })),
+    ),
     ratingAverage: raw.community?.rating?.average ?? null,
     ratingCount: raw.community?.rating?.count ?? null,
     haveCount: raw.community?.have ?? null,
