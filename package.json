@@ -16,6 +16,7 @@
     "db:import": "ts-node --transpile-only scripts/import-dump.ts",
     "db:dedupe-videos": "ts-node --transpile-only scripts/dedupe-videos.ts",
     "db:requeue-have-want": "ts-node --transpile-only scripts/requeue-have-want.ts",
+    "db:requeue-raw": "ts-node --transpile-only scripts/requeue-raw-release.ts",
     "docs:db": "ts-node --transpile-only scripts/generate-dbml.ts",
     "docs:deps": "depcruise src --config .dependency-cruiser.cjs --exclude \"^(node_modules|crypto|fs|os|path|zlib|string_decoder|src/discogs-client.test)\" --collapse \"^src/[^/]+\" --output-type mermaid > docs/architecture/modules.mmd",
     "deps:check": "depcruise src --config .dependency-cruiser.cjs",
