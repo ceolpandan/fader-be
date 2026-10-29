@@ -1,4 +1,5 @@
 import { SaxesParser } from "saxes";
+import { dedupeVideos } from "../db/dedupe-videos";
 import type { releases, ReleaseArtistStub, ReleaseFormat, ReleaseLabel, ReleaseTrack, ReleaseVideo } from "../db/schema";
 
 /** What one `<release>` of the Discogs releases dump holds that Fader keeps. */
@@ -163,6 +164,6 @@ export function toReleaseRow(r: DumpRelease): typeof releases.$inferInsert {
     labels: r.labels,
     artists: r.artists,
     tracklist: r.tracklist,
-    videos: r.videos,
+    videos: dedupeVideos(r.videos),
   };
 }
