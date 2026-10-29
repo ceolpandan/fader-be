@@ -75,6 +75,7 @@ collector has saved a token. `DB_PATH` controls where the SQLite database file l
 - `npm run db:generate` — generate a Drizzle migration from `src/db/schema.ts`
 - `npm run db:migrate` — apply migrations to the SQLite file at `DB_PATH`
 - `npm run db:import -- <releases.xml> <new.sqlite> [--carry-over old.sqlite] [--sample 1000x6]` — build a new database from the Discogs dump (see `docs/adr/0007-catalogue-from-data-dump.md`)
+- `npm run db:requeue-raw -- [uid] [--limit N] [--dry-run]` — queue a `release_detail` job for each enriched release that has no `release_raw` row, the collector's wantlist and collection first; the server's queue carries them out once it is running (fader-ui#151)
 
 ## Layout
 

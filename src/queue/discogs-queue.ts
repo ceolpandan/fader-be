@@ -17,6 +17,12 @@ export const SEARCH_PRIORITY = 5;
 export const SYNC_PRIORITY = 5;
 /** Priority of a collector's wantlist availability fetches: ahead of background enrichment (0), behind the sync and searches (5). */
 export const AVAILABILITY_PRIORITY = 1;
+/**
+ * Priority of the one-off fetch that stores the raw response of releases enriched before
+ * `release_raw` existed (fader-ui#151): behind everything else, including a run the collector
+ * starts (0), which would otherwise wait behind its ~260k jobs.
+ */
+export const RAW_BACKFILL_PRIORITY = -1;
 export const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 export const BASE_BACKOFF_MS = 2000;
 /** The first pause after a transient Discogs error; each further failure in a row doubles it. */
