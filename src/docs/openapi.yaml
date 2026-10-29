@@ -1360,6 +1360,113 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDto"
+  /digital/{store}/session:
+    put:
+      operationId: setStoreSession
+      summary: Paste the curl a digital store is searched with
+      description: >
+        Takes a curl command copied from the browser ("Copy as cURL") for the
+        store and keeps its headers and cookies **in memory** for 24 hours, per
+        user and store. The login cookies (`identity`, `js_logged_in`) are
+        dropped: searching needs no login. A server restart forgets the
+        session. 400 when the text is not a curl for that store; 404 for an
+        unknown store.
+      parameters:
+        - in: path
+          name: store
+          required: true
+          schema: { type: string, enum: [bandcamp] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveStoreSessionRequestDto"
+      responses:
+        "200":
+          description: The session is kept
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoreSessionDto"
+        "400":
+          description: The curl is missing, too long, or not a curl for the store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Unknown store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /digital/{store}/matches:
+    post:
+      operationId: checkDigitalMatch
+      summary: Check a wantlist item against a digital store
+      description: >
+        Searches the store for the release: the album first and, when that is
+        not found, each track. Every request to the store goes through one lane
+        per store, one request per 1.2 s, so the answer takes about a second
+        per request (a 12-track release that is not found takes about 16 s).
+        The result is stored on the shared `digital_matches` table, replacing
+        an earlier check, and returned. A hit counts when its title matches
+        (ignoring case, accents, punctuation and a trailing "(Original Mix)")
+        and its artist is one of the release's; a compilation ("Various") skips
+        the album search and a track counts when it is on an album of the same
+        title. 409 with code `store_session_required` when no session was
+        pasted, it expired or the store refused it (the session is then
+        forgotten): paste a fresh curl and retry. Also 409 when the wantlist
+        item's release is not stored yet.
+      parameters:
+        - in: path
+          name: store
+          required: true
+          schema: { type: string, enum: [bandcamp] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckDigitalMatchRequestDto"
+      responses:
+        "200":
+          description: The result of the check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DigitalMatchDto"
+        "400":
+          description: Invalid releaseId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Unknown store, or the release is not on this user's wantlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: store_session_required, or the release is not stored yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: The check failed unexpectedly
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: The store is unavailable right now (429, 5xx or no answer)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
   /settings/discogs-token:
     get:
       operationId: getDiscogsToken
@@ -1877,7 +1984,7 @@ components:
 
     WantlistItemDto:
       type: object
-      required: [releaseId, title, year, formats, artists, numForSale, lowestPrice, lowestPriceCurrency, thumb, addedAt]
+      required: [releaseId, title, year, formats, artists, numForSale, lowestPrice, lowestPriceCurrency, thumb, addedAt, digitalMatches]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -1909,6 +2016,54 @@ components:
           type: string
           format: date-time
           nullable: true
+        digitalMatches:
+          type: array
+          description: What checking the release against each digital store found; a store not checked yet has no entry.
+          items: { $ref: "#/components/schemas/DigitalMatchDto" }
+
+    DigitalMatchTrackDto:
+      type: object
+      required: [position, title, url]
+      properties:
+        position: { type: string, description: The Discogs position of the track, for example A1. }
+        title: { type: string }
+        url: { type: string }
+
+    DigitalMatchDto:
+      type: object
+      required: [store, status, url, tracks, trackCount, checkedAt]
+      properties:
+        store: { type: string, enum: [bandcamp] }
+        status:
+          type: string
+          enum: [album, tracks, none]
+          description: album (the whole release is there), tracks (some tracks are) or none.
+        url: { type: string, nullable: true, description: The album URL for album; null otherwise. }
+        tracks:
+          type: array
+          description: The tracks that were found, for tracks; empty otherwise.
+          items: { $ref: "#/components/schemas/DigitalMatchTrackDto" }
+        trackCount: { type: integer, nullable: true, description: "How many of the release's tracks were searched, for tracks and none; null for album." }
+        checkedAt: { type: string, format: date-time }
+
+    SaveStoreSessionRequestDto:
+      type: object
+      required: [curl]
+      properties:
+        curl: { type: string, maxLength: 32000, description: A curl command copied from the browser. }
+
+    StoreSessionDto:
+      type: object
+      required: [store, expiresAt]
+      properties:
+        store: { type: string, enum: [bandcamp] }
+        expiresAt: { type: string, format: date-time }
+
+    CheckDigitalMatchRequestDto:
+      type: object
+      required: [releaseId]
+      properties:
+        releaseId: { type: integer, minimum: 1 }
 
     WantlistPageDto:
       type: object

@@ -1,8 +1,9 @@
-import { and, asc, count, desc, eq, max, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, max, sql, type SQL } from "drizzle-orm";
 import { Router, type Request } from "express";
 import type { Db } from "../db/client";
 import { getDiscogsToken } from "../db/discogs-tokens";
-import { releases, wantlistFolderItems, wantlistItems } from "../db/schema";
+import { digitalMatches, releases, wantlistFolderItems, wantlistItems } from "../db/schema";
+import { toDigitalMatchDto } from "../digital/digital-match-dto";
 import { DiscogsAuthError } from "../discogs-client";
 import { shownPrice } from "../dto/price";
 import type {
@@ -159,10 +160,19 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
       .offset((paging.page - 1) * paging.pageSize)
       .all();
 
+    const matchRows = rows.length
+      ? db
+          .select()
+          .from(digitalMatches)
+          .where(inArray(digitalMatches.releaseId, rows.map((row) => row.releaseId)))
+          .orderBy(asc(digitalMatches.store))
+          .all()
+      : [];
     const items: WantlistItemDto[] = rows.map((row) => ({
       ...row,
       ...shownPrice(row.lowestPrice, row.lowestPriceCurrency),
       addedAt: row.addedAt?.toISOString() ?? null,
+      digitalMatches: matchRows.filter((m) => m.releaseId === row.releaseId).map(toDigitalMatchDto),
     }));
     const updatedAt = db
       .select({ at: max(releases.numForSaleAt) })
