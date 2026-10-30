@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 import type { Express } from "express";
 import { createDb, type Db } from "../db/client";
-import { discogsTokens, hiddenReleases, releases, wantlistItems } from "../db/schema";
+import { digitalMatches, discogsTokens, hiddenReleases, releases, wantlistItems } from "../db/schema";
 import { encryptToken } from "../util/token-crypto";
 import { and, eq } from "drizzle-orm";
 import { DiscogsAuthError } from "../discogs-client";
@@ -157,6 +157,42 @@ describe("wantlist", () => {
     expect(ids(res.body)).toEqual([2, 1, 3]);
     expect(res.body).toMatchObject({ total: 3, wantlistCount: 4, unmatchedCount: 2 });
     expect((await asUser(app, "u1").get("/wantlist?hideNoneForSale=false")).body.total).toBe(4);
+  });
+
+  describe("availableOn", () => {
+    const match = (releaseId: number, status: "album" | "tracks" | "none", store = "bandcamp") =>
+      db
+        .insert(digitalMatches)
+        .values({ releaseId, store, status, url: null, tracks: [], trackCount: null, checkedAt: new Date() })
+        .run();
+
+    it("keeps the items with an album or some tracks on the store, not those with none or unchecked, and counts the tab without the filter", async () => {
+      match(1, "album");
+      match(2, "tracks");
+      match(4, "none");
+
+      const res = await asUser(app, "u1").get("/wantlist?availableOn=bandcamp");
+
+      expect(ids(res.body)).toEqual([2, 1]);
+      expect(res.body).toMatchObject({ total: 2, wantlistCount: 4, unmatchedCount: 2 });
+    });
+
+    it("follows the other filters, and shows nothing when nothing was found", async () => {
+      match(1, "album");
+      match(4, "album");
+
+      expect(ids((await asUser(app, "u1").get("/wantlist?availableOn=bandcamp&hideNoneForSale=true")).body)).toEqual([1]);
+      expect((await asUser(app, "u2").get("/wantlist?availableOn=bandcamp")).body.total).toBe(0);
+    });
+
+    it("only counts matches for the store asked about", async () => {
+      match(1, "album", "beatport");
+      expect((await asUser(app, "u1").get("/wantlist?availableOn=bandcamp")).body.total).toBe(0);
+    });
+
+    it("rejects an unknown store", async () => {
+      expect((await asUser(app, "u1").get("/wantlist?availableOn=beatport")).status).toBe(400);
+    });
   });
 
   it("searches the title and artist names, every word, ignoring case, with the tab count unfiltered", async () => {

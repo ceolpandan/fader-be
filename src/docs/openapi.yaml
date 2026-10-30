@@ -1037,6 +1037,14 @@ paths:
           description: >
             "true" leaves out items that are in any folder. Not with `folderId`.
           schema: { type: boolean, default: false }
+        - name: availableOn
+          in: query
+          description: >
+            Only the items the digital store has: its `digital_matches` row has
+            status `album` or `tracks`. Items not checked yet, and those with
+            status `none`, are left out. `total` follows it; `wantlistCount`
+            does not. 400 for an unknown store.
+          schema: { type: string, enum: [bandcamp] }
         - name: q
           in: query
           description: >
@@ -1369,8 +1377,9 @@ paths:
         store and keeps its headers and cookies **in memory** for 24 hours, per
         user and store. The login cookies (`identity`, `js_logged_in`) are
         dropped: searching needs no login. A server restart forgets the
-        session. 400 when the text is not a curl for that store; 404 for an
-        unknown store.
+        session. A scan of the wantlist that stopped for a fresh curl
+        (`needs-session`) carries on once it is saved. 400 when the text is not
+        a curl for that store; 404 for an unknown store.
       parameters:
         - in: path
           name: store
@@ -1463,6 +1472,119 @@ paths:
                 $ref: "#/components/schemas/ErrorDto"
         "503":
           description: The store is unavailable right now (429, 5xx or no answer)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /digital/{store}/scan:
+    get:
+      operationId: getDigitalScan
+      summary: The active scan of the wantlist against a digital store, or the last one
+      description: >
+        Only the latest scan per user and store is kept. `scan` is null when
+        none was started. Poll it for the progress.
+      parameters:
+        - in: path
+          name: store
+          required: true
+          schema: { type: string, enum: [bandcamp] }
+      responses:
+        "200":
+          description: The scan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DigitalScanStatusDto"
+        "404":
+          description: Unknown store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+    post:
+      operationId: startDigitalScan
+      summary: Scan the whole wantlist against a digital store
+      description: >
+        Checks every wantlist item that has a `releases` row and no result yet
+        (all of them with `recheck`), one after another through the store's lane,
+        one request per 1.2 s. A check started from a card jumps ahead of the
+        scan's next request. **Unmatched** items (no release stored yet) are
+        skipped and counted in `skipped`. Per item that is one album search
+        plus, on a miss, one search per track, so progress and the estimate
+        count requests. The scan runs in the server, in memory with its
+        progress stored: only the latest scan per user and store is kept.
+
+
+        When the store refuses the session (a bot challenge or a 403) the scan
+        stops as `needs-session` and keeps its progress; paste a fresh curl
+        with `PUT /digital/{store}/session` and it carries on from where it
+        stopped, without checking finished items again. A restart of the server
+        leaves a running scan in the same state. When the store answers 429, 5xx
+        or nothing, the scan is `paused` and tries the same item again after
+        1, 2, 4, 8, then 10 minutes (the Discogs Pause steps); about an hour of
+        failing ends it as `failed`. An item that keeps failing otherwise is
+        counted in `failed` and the scan moves on.
+      parameters:
+        - in: path
+          name: store
+          required: true
+          schema: { type: string, enum: [bandcamp] }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartDigitalScanRequestDto"
+      responses:
+        "201":
+          description: The scan has started (done at once when there is nothing to check)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DigitalScanDto"
+        "400":
+          description: recheck is not a boolean
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Unknown store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: store_session_required (paste a fresh curl first), or scan_active (a scan has not ended; a scan waiting for a curl resumes when one is pasted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /digital/{store}/scan/cancel:
+    post:
+      operationId: cancelDigitalScan
+      summary: Stop the active scan
+      description: The request in flight still finishes; the scan's progress is kept.
+      parameters:
+        - in: path
+          name: store
+          required: true
+          schema: { type: string, enum: [bandcamp] }
+      responses:
+        "200":
+          description: The cancelled scan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DigitalScanDto"
+        "404":
+          description: Unknown store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: no_active_scan
           content:
             application/json:
               schema:
@@ -2064,6 +2186,70 @@ components:
       required: [releaseId]
       properties:
         releaseId: { type: integer, minimum: 1 }
+
+    StartDigitalScanRequestDto:
+      type: object
+      properties:
+        recheck:
+          type: boolean
+          description: Also check the items that already have a result. Defaults to false.
+
+    DigitalScanDto:
+      type: object
+      required: [store, status, recheck, total, checked, album, tracks, none, skipped, failed, requestsDone, requestsRemaining, etaSeconds, current, pausedUntil, errorMessage, startedAt, finishedAt]
+      properties:
+        store: { type: string, enum: [bandcamp] }
+        status:
+          type: string
+          enum: [running, paused, needs-session, done, cancelled, failed]
+          description: >
+            running checks; paused waits out a store error until pausedUntil;
+            needs-session stopped for a fresh curl and resumes once one is
+            pasted; the rest have ended.
+        recheck: { type: boolean }
+        total: { type: integer, description: The items the scan set out to check. }
+        checked: { type: integer, description: "Items checked so far: album + tracks + none." }
+        album: { type: integer }
+        tracks: { type: integer }
+        none: { type: integer }
+        skipped: { type: integer, description: Unmatched wantlist items (no release stored yet), which a scan cannot check. }
+        failed: { type: integer, description: Items that could not be checked, which the scan moved on from. }
+        requestsDone: { type: integer, description: Requests made to the store so far. }
+        requestsRemaining:
+          type: integer
+          description: >
+            An estimate of the requests still to make: the most the unchecked
+            items could take (an album search plus a search for each track),
+            scaled by how many the checked items took against that most.
+        etaSeconds:
+          type: integer
+          nullable: true
+          description: Seconds left, from requestsRemaining at the store's pace plus any pause; null unless running or paused.
+        current:
+          type: object
+          nullable: true
+          description: The item being checked; null between items and once the scan has ended.
+          required: [releaseId, title, artists]
+          properties:
+            releaseId: { type: integer }
+            title: { type: string }
+            artists:
+              type: array
+              items:
+                $ref: "#/components/schemas/ReleaseArtistDto"
+        pausedUntil: { type: string, format: date-time, nullable: true }
+        errorMessage: { type: string, nullable: true }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+
+    DigitalScanStatusDto:
+      type: object
+      required: [scan]
+      properties:
+        scan:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/DigitalScanDto"
 
     WantlistPageDto:
       type: object

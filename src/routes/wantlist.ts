@@ -4,6 +4,7 @@ import type { Db } from "../db/client";
 import { getDiscogsToken } from "../db/discogs-tokens";
 import { digitalMatches, releases, wantlistFolderItems, wantlistItems } from "../db/schema";
 import { toDigitalMatchDto } from "../digital/digital-match-dto";
+import { DIGITAL_STORE_IDS, type DigitalStoreId } from "../digital/types";
 import { DiscogsAuthError } from "../discogs-client";
 import { shownPrice } from "../dto/price";
 import type {
@@ -97,6 +98,11 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
 
     const hideNone = req.query.hideNoneForSale === "true";
     const hideFoldered = req.query.hideFoldered === "true";
+    const availableOn = req.query.availableOn;
+    if (availableOn !== undefined && !DIGITAL_STORE_IDS.includes(availableOn as DigitalStoreId)) {
+      res.status(400).json({ error: `availableOn must be one of ${DIGITAL_STORE_IDS.join(", ")}` });
+      return;
+    }
     let folderId: number | undefined;
     if (req.query.folderId !== undefined) {
       folderId = Number(req.query.folderId);
@@ -134,6 +140,12 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
     if (hideFoldered) {
       conditions.push(
         sql`NOT EXISTS (SELECT 1 FROM ${wantlistFolderItems} WHERE ${wantlistFolderItems.uid} = ${uid} AND ${wantlistFolderItems.releaseId} = ${wantlistItems.releaseId})`,
+      );
+    }
+    // Available: the store has the album, or some of its tracks. Unchecked and "none" items go.
+    if (availableOn !== undefined) {
+      conditions.push(
+        sql`EXISTS (SELECT 1 FROM ${digitalMatches} WHERE ${digitalMatches.releaseId} = ${wantlistItems.releaseId} AND ${digitalMatches.store} = ${availableOn} AND ${digitalMatches.status} IN ('album', 'tracks'))`,
       );
     }
     const shown = and(...conditions);

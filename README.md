@@ -53,6 +53,16 @@ See `docs/adr/0008-enrichment-runs.md`. `ENRICH_MAX_RELEASES` caps one run (see 
 - `POST /me/discogs-profile/counts` — fetch the two counts without syncing
 - `POST /me/discogs-profile/refresh` — start the sync of the collection and wantlist (202, poll the GET): it mirrors both lists, hides the releases on them and fades their masters. See `docs/adr/0009-collection-wantlist-sync.md`
 
+### Digital stores
+
+- `PUT /digital/:store/session` — paste the curl a store is searched with (kept in memory for 24 h)
+- `POST /digital/:store/matches` — check one wantlist item (`{ releaseId }`); 409 `store_session_required`
+- `POST /digital/:store/scan` — scan the whole wantlist (`{ recheck }`); 409 `store_session_required` or `scan_active`
+- `GET /digital/:store/scan` — the active scan, or the last one, with counts, the requests left and the time left
+- `POST /digital/:store/scan/cancel` — stop the active scan
+
+See `docs/adr/0011-digital-store-strategy.md`.
+
 ### Saved filters
 
 - `GET /saved-filters`, `POST /saved-filters` (409 when the collector already saved that query), `PATCH /saved-filters/:id` (rename) and `DELETE /saved-filters/:id`

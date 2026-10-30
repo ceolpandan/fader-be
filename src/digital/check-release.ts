@@ -14,6 +14,26 @@ export interface CheckableRelease {
 /** How many near-misses a miss logs, so the matching rules can be loosened after a test run. */
 const LOGGED_REJECTS = 3;
 
+export interface CheckOptions {
+  /** The lane priority of the requests: `CHECK_PRIORITY` for a check a person waits on, 0 (the default) for a scan. */
+  priority?: number;
+  /** Called as each request to the store is made, so a scan can count them. */
+  onRequest?: () => void;
+  /** Once aborted, the check makes no further request and throws. */
+  signal?: AbortSignal;
+}
+
+/** The most requests checking the release takes: the album search plus a search for every track, as far as the store does either. */
+export function maxRequests(store: DigitalStore, release: CheckableRelease): number {
+  const album = store.searchReleases && !isVariousArtists(release.artists) ? 1 : 0;
+  return album + (store.searchTracks ? searchableTracks(release).length : 0);
+}
+
+/** A heading in the tracklist ("Side A") has no position and is not a track. */
+function searchableTracks(release: CheckableRelease): ReleaseTrack[] {
+  return release.tracklist.filter((t) => t.position.trim() !== "");
+}
+
 /**
  * Checks one release against one store: the album first, and only when that is not found, every
  * track. Every request goes through the store's lane. Throws what the store throws
@@ -28,7 +48,14 @@ export async function checkRelease(
   lane: PacedLane,
   session: StoreSession,
   release: CheckableRelease,
+  { priority = 0, onRequest, signal }: CheckOptions = {},
 ): Promise<DigitalMatchResult> {
+  const request = <T>(task: () => Promise<T>): Promise<T> =>
+    lane.run(() => {
+      signal?.throwIfAborted();
+      onRequest?.();
+      return task();
+    }, priority);
   const various = isVariousArtists(release.artists);
   const accepts = (hit: StoreHit, title: string): boolean =>
     titlesMatch(hit.title, title) &&
@@ -36,7 +63,7 @@ export async function checkRelease(
 
   if (store.searchReleases && !various) {
     const query = searchQuery(release.artists, release.title);
-    const hits = await lane.run(() => store.searchReleases!(session, query));
+    const hits = await request(() => store.searchReleases!(session, query));
     const album = hits.find((hit) => hit.kind === "album" && accepts(hit, release.title));
     if (album) return { status: "album", url: album.url, tracks: [], trackCount: null };
     logRejects(store, release, query, hits);
@@ -44,11 +71,10 @@ export async function checkRelease(
 
   if (store.searchTracks) {
     const found: FoundTrack[] = [];
-    // A heading in the tracklist ("Side A") has no position and is not a track.
-    const tracks = release.tracklist.filter((t) => t.position.trim() !== "");
+    const tracks = searchableTracks(release);
     for (const track of tracks) {
       const query = various ? `${release.title} ${track.title}` : searchQuery(release.artists, track.title);
-      const hits = await lane.run(() => store.searchTracks!(session, query));
+      const hits = await request(() => store.searchTracks!(session, query));
       const hit = hits.find((h) => h.kind === "track" && accepts(h, track.title));
       if (hit) found.push({ position: track.position, title: track.title, url: hit.url });
       else logRejects(store, release, query, hits);

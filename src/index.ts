@@ -15,6 +15,7 @@ import {
   getWantlistPage,
   searchFirstReleaseId,
 } from "./discogs-client";
+import { settleScansAfterRestart } from "./digital/digital-scan";
 import { failRun, finishRunsWithNothingLeft, finishRunWhenSettled } from "./enrichment/enrichment-run";
 import { createDiscogsProfileHandler } from "./indexing/discogs-profile-handler";
 import { createDiscogsSyncHandler } from "./indexing/discogs-sync-handler";
@@ -94,6 +95,8 @@ queue.onRunAborted((runId, cause) => failRun(db, runId, cause));
 queue.onRunAborted((runId) => failScrapeSearches(db, runId));
 // Runs and their jobs are stored, so a run the server stopped in the middle of carries on.
 finishRunsWithNothingLeft(db);
+// A digital scan the server stopped lost its curl with it, so it waits for a fresh one.
+settleScansAfterRestart(db);
 queue.start();
 
 const readRunner = createWorkerReadRunner(dbPath, Number(process.env.READ_WORKERS) || 2);

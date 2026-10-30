@@ -10,7 +10,7 @@ import { createDb, type Db } from "../db/client";
 import { digitalMatches, releases, wantlistItems } from "../db/schema";
 import { DiscogsQueue } from "../queue/discogs-queue";
 import { createApp } from "../app";
-import { PacedLane } from "../digital/paced-lane";
+import { CHECK_PRIORITY, PacedLane } from "../digital/paced-lane";
 import { StoreSessions } from "../digital/store-sessions";
 import type { DigitalStores } from "../digital/digital-stores";
 import {
@@ -58,6 +58,7 @@ describe("digital matches", () => {
   let queue: DiscogsQueue;
   let app: Express;
   let sessions: StoreSessions;
+  let lane: PacedLane;
   let searchReleases: Mock<NonNullable<DigitalStore["searchReleases"]>>;
   let searchTracks: Mock<NonNullable<DigitalStore["searchTracks"]>>;
 
@@ -75,8 +76,9 @@ describe("digital matches", () => {
       searchTracks: (...args) => searchTracks(...args),
     };
     sessions = new StoreSessions();
+    lane = new PacedLane(0);
     const digital: DigitalStores = {
-      stores: { bandcamp: { store, lane: new PacedLane(0), host: "bandcamp.com" } },
+      stores: { bandcamp: { store, lane, host: "bandcamp.com" } },
       sessions,
     };
     app = createApp({ db, queue, digital });
@@ -243,6 +245,139 @@ describe("digital matches", () => {
       expect((await check("1")).status).toBe(400);
       expect((await check(0)).status).toBe(400);
       expect((await asUser(app, "u1").post("/digital/beatport/matches").send({ releaseId: 1 })).status).toBe(404);
+    });
+
+    it("goes ahead of a scan's requests on the store's lane", async () => {
+      sessions.set("u1", "bandcamp", { headers: {} });
+      const run = vi.spyOn(lane, "run");
+
+      await asUser(app, "u1").post("/digital/bandcamp/matches").send({ releaseId: 1 });
+
+      expect(run).toHaveBeenCalledWith(expect.any(Function), CHECK_PRIORITY);
+    });
+  });
+
+  describe("scanning the wantlist", () => {
+    const untilScan = (status: string) =>
+      vi.waitFor(async () => {
+        const res = await asUser(app, "u1").get("/digital/bandcamp/scan");
+        expect(res.body.scan?.status).toBe(status);
+      });
+
+    it("requires a signed-in user", async () => {
+      expect((await request(app).post("/digital/bandcamp/scan")).status).toBe(401);
+    });
+
+    it("has no scan until one is started", async () => {
+      const res = await asUser(app, "u1").get("/digital/bandcamp/scan");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ scan: null });
+    });
+
+    it("asks for a fresh curl when there is none", async () => {
+      const res = await asUser(app, "u1").post("/digital/bandcamp/scan").send({});
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe("store_session_required");
+    });
+
+    it("scans the wantlist and reports the progress", async () => {
+      sessions.set("u1", "bandcamp", { headers: {} });
+
+      const started = await asUser(app, "u1").post("/digital/bandcamp/scan").send({});
+      expect(started.status).toBe(201);
+      expect(started.body).toMatchObject({ store: "bandcamp", recheck: false, total: 1, skipped: 1 });
+
+      await untilScan("done");
+      const res = await asUser(app, "u1").get("/digital/bandcamp/scan");
+      expect(res.body.scan).toMatchObject({
+        checked: 1,
+        album: 1,
+        tracks: 0,
+        none: 0,
+        failed: 0,
+        skipped: 1,
+        requestsDone: 1,
+        requestsRemaining: 0,
+        etaSeconds: null,
+        current: null,
+        pausedUntil: null,
+      });
+      expect(
+        db.select().from(digitalMatches).where(eq(digitalMatches.releaseId, 1)).get(),
+      ).toMatchObject({ status: "album" });
+    });
+
+    it("estimates the requests and time left while it runs", async () => {
+      sessions.set("u1", "bandcamp", { headers: {} });
+      let answer!: () => void;
+      searchReleases.mockImplementationOnce(() => new Promise((resolve) => (answer = () => resolve([albumHit]))));
+
+      await asUser(app, "u1").post("/digital/bandcamp/scan").send({});
+      await vi.waitFor(() => expect(searchReleases).toHaveBeenCalled());
+      const running = (await asUser(app, "u1").get("/digital/bandcamp/scan")).body.scan;
+
+      expect(running).toMatchObject({
+        status: "running",
+        checked: 0,
+        requestsDone: 1,
+        requestsRemaining: 2,
+        current: { releaseId: 1, title: "Permutation" },
+      });
+      // The test lane has no gap between requests, so the time left is nil.
+      expect(running.etaSeconds).toBe(0);
+      answer();
+      await untilScan("done");
+    });
+
+    it("keeps one active scan and rejects a bad body", async () => {
+      sessions.set("u1", "bandcamp", { headers: {} });
+      let answer!: () => void;
+      searchReleases.mockImplementationOnce(() => new Promise((resolve) => (answer = () => resolve([albumHit]))));
+      await asUser(app, "u1").post("/digital/bandcamp/scan").send({});
+
+      const again = await asUser(app, "u1").post("/digital/bandcamp/scan").send({});
+      expect(again.status).toBe(409);
+      expect(again.body.code).toBe("scan_active");
+      expect((await asUser(app, "u1").post("/digital/bandcamp/scan").send({ recheck: "yes" })).status).toBe(400);
+      answer();
+      await untilScan("done");
+    });
+
+    it("stops with needs-session when the store refuses the curl and carries on once a fresh one is pasted", async () => {
+      sessions.set("u1", "bandcamp", { headers: {} });
+      searchReleases.mockRejectedValueOnce(new StoreSessionExpiredError());
+      await asUser(app, "u1").post("/digital/bandcamp/scan").send({});
+      await untilScan("needs-session");
+
+      await asUser(app, "u1").put("/digital/bandcamp/session").send({ curl: CURL });
+      await untilScan("done");
+      expect((await asUser(app, "u1").get("/digital/bandcamp/scan")).body.scan).toMatchObject({ album: 1 });
+    });
+
+    it("cancels the active scan", async () => {
+      sessions.set("u1", "bandcamp", { headers: {} });
+      expect((await asUser(app, "u1").post("/digital/bandcamp/scan/cancel")).body.code).toBe("no_active_scan");
+
+      let answer!: () => void;
+      searchReleases.mockImplementationOnce(() => new Promise((resolve) => (answer = () => resolve([albumHit]))));
+      await asUser(app, "u1").post("/digital/bandcamp/scan").send({});
+      await vi.waitFor(() => expect(searchReleases).toHaveBeenCalled());
+
+      const res = await asUser(app, "u1").post("/digital/bandcamp/scan/cancel");
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("cancelled");
+      answer();
+    });
+
+    it("keeps each collector's scan to themselves, and rejects an unknown store", async () => {
+      sessions.set("u1", "bandcamp", { headers: {} });
+      await asUser(app, "u1").post("/digital/bandcamp/scan").send({});
+      await untilScan("done");
+
+      expect((await asUser(app, "u2").get("/digital/bandcamp/scan")).body).toEqual({ scan: null });
+      expect((await asUser(app, "u1").get("/digital/beatport/scan")).status).toBe(404);
+      expect((await asUser(app, "u1").post("/digital/beatport/scan")).status).toBe(404);
+      expect((await asUser(app, "u1").post("/digital/beatport/scan/cancel")).status).toBe(404);
     });
   });
 
