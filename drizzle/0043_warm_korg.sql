@@ -1,0 +1,21 @@
+CREATE TABLE `digital_scans` (
+	`uid` text NOT NULL,
+	`store` text NOT NULL,
+	`recheck` integer NOT NULL,
+	`status` text NOT NULL,
+	`total` integer NOT NULL,
+	`skipped` integer NOT NULL,
+	`album_count` integer DEFAULT 0 NOT NULL,
+	`tracks_count` integer DEFAULT 0 NOT NULL,
+	`none_count` integer DEFAULT 0 NOT NULL,
+	`failed_release_ids` text DEFAULT '[]' NOT NULL,
+	`requests_done` integer DEFAULT 0 NOT NULL,
+	`requests_planned` integer NOT NULL,
+	`planned_done` integer DEFAULT 0 NOT NULL,
+	`current_release_id` integer,
+	`paused_until` integer,
+	`error_message` text,
+	`started_at` integer NOT NULL,
+	`finished_at` integer,
+	PRIMARY KEY(`uid`, `store`)
+);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PacedLane } from "./paced-lane";
+import { CHECK_PRIORITY, PacedLane } from "./paced-lane";
 
 describe("PacedLane", () => {
   function clock() {
@@ -22,6 +22,20 @@ describe("PacedLane", () => {
     const starts: number[] = [];
     await Promise.all([1, 2, 3].map(() => lane.run(async () => starts.push(c.now()))));
     expect(starts).toEqual([0, 1200, 2400]);
+  });
+
+  it("starts a higher priority task before the waiting ones, keeping the gap", async () => {
+    const c = clock();
+    const lane = new PacedLane(1200, c.now, c.sleep);
+    const started: string[] = [];
+    const task = (name: string) => async () => started.push(`${name}@${c.now()}`);
+    await Promise.all([
+      lane.run(task("running")),
+      lane.run(task("scan 1")),
+      lane.run(task("scan 2")),
+      lane.run(task("check"), CHECK_PRIORITY),
+    ]);
+    expect(started).toEqual(["running@0", "check@1200", "scan 1@2400", "scan 2@3600"]);
   });
 
   it("does not wait when the gap has already passed", async () => {

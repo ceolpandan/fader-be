@@ -523,3 +523,42 @@ export const digitalMatches = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.releaseId, table.store] })],
 );
+
+export type DigitalScanStatus = "running" | "paused" | "needs-session" | "done" | "cancelled" | "failed";
+
+/**
+ * A collector's scan of their wantlist against a digital store (fader-ui#161), one request at a
+ * time on the store's lane. Only the latest scan per collector and store is kept. What is left to
+ * check is not stored: it is the wantlist items with a release stored and no match since the scan
+ * began (for a recheck) or at all, minus `failedReleaseIds`, so a scan stopped for a fresh session
+ * resumes without repeating finished items. `total` is the items the scan set out to check,
+ * `skipped` the Unmatched ones it left alone. `requestsPlanned` is the most requests the items
+ * could take and `plannedDone` the same for those settled, which an estimate of the requests left
+ * scales by how many the settled ones really took (`requestsDone`).
+ */
+export const digitalScans = sqliteTable(
+  "digital_scans",
+  {
+    uid: text("uid").notNull(),
+    store: text("store").notNull(),
+    recheck: integer("recheck", { mode: "boolean" }).notNull(),
+    status: text("status").$type<DigitalScanStatus>().notNull(),
+    total: integer("total").notNull(),
+    skipped: integer("skipped").notNull(),
+    albumCount: integer("album_count").notNull().default(0),
+    tracksCount: integer("tracks_count").notNull().default(0),
+    noneCount: integer("none_count").notNull().default(0),
+    failedReleaseIds: text("failed_release_ids", { mode: "json" }).$type<number[]>().notNull().default([]),
+    requestsDone: integer("requests_done").notNull().default(0),
+    requestsPlanned: integer("requests_planned").notNull(),
+    plannedDone: integer("planned_done").notNull().default(0),
+    /** The release being checked; null between items and once the scan has ended. */
+    currentReleaseId: integer("current_release_id"),
+    /** While `paused`: when the store is tried again. */
+    pausedUntil: integer("paused_until", { mode: "timestamp" }),
+    errorMessage: text("error_message"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    finishedAt: integer("finished_at", { mode: "timestamp" }),
+  },
+  (table) => [primaryKey({ columns: [table.uid, table.store] })],
+);

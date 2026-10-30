@@ -28,6 +28,10 @@ export const BASE_BACKOFF_MS = 2000;
 /** The first pause after a transient Discogs error; each further failure in a row doubles it. */
 export const PAUSE_BASE_MS = 60_000;
 export const PAUSE_CAP_MS = 10 * 60_000;
+/** The pause after `failures` transient errors in a row: 1, 2, 4, 8 minutes, then 10. */
+export function pauseStepMs(failures: number): number {
+  return Math.min(PAUSE_BASE_MS * 2 ** (failures - 1), PAUSE_CAP_MS);
+}
 /** Retries at the cap (with no success in between) before the queue gives up on Discogs. */
 export const MAX_CAP_RETRIES = 5;
 /**
@@ -424,7 +428,7 @@ if (this.started && this.hasPending(uid)) this.scheduleTick(uid, lane, PACING_MS
   private pauseAndRetry(job: QueueJobRow, err: DiscogsTransientError): void {
     const lane = this.lane(job.uid);
     lane.consecutiveFailures += 1;
-    const stepMs = Math.min(PAUSE_BASE_MS * 2 ** (lane.consecutiveFailures - 1), PAUSE_CAP_MS);
+    const stepMs = pauseStepMs(lane.consecutiveFailures);
     if (stepMs === PAUSE_CAP_MS) lane.capRetries += 1;
 
     if (lane.capRetries > MAX_CAP_RETRIES) {

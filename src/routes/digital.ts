@@ -1,18 +1,28 @@
 import { and, eq } from "drizzle-orm";
 import { Router } from "express";
 import type { Db } from "../db/client";
-import { digitalMatches, releases, wantlistItems } from "../db/schema";
+import { releases, wantlistItems } from "../db/schema";
 import { checkRelease } from "../digital/check-release";
 import { InvalidCurlError, parseCurl } from "../digital/curl";
 import { toDigitalMatchDto } from "../digital/digital-match-dto";
+import { DigitalScanner, type DigitalScanRow } from "../digital/digital-scan";
+import { toDigitalScanDto } from "../digital/digital-scan-dto";
 import type { DigitalStores } from "../digital/digital-stores";
+import { CHECK_PRIORITY } from "../digital/paced-lane";
+import { saveDigitalMatch } from "../digital/save-match";
 import {
   DIGITAL_STORE_IDS,
   StoreSessionExpiredError,
   StoreUnavailableError,
   type DigitalStoreId,
 } from "../digital/types";
-import type { CheckDigitalMatchRequestDto, SaveStoreSessionRequestDto, StoreSessionDto } from "../dto/digital.dto";
+import type {
+  CheckDigitalMatchRequestDto,
+  DigitalScanStatusDto,
+  SaveStoreSessionRequestDto,
+  StartDigitalScanRequestDto,
+  StoreSessionDto,
+} from "../dto/digital.dto";
 import { logger } from "../util/logger";
 
 export interface DigitalRouterDeps {
@@ -34,6 +44,7 @@ const SESSION_REQUIRED = { error: "Paste a fresh curl from your browser first", 
 export function createDigitalRouter(deps: DigitalRouterDeps): Router {
   const router = Router();
   const { db, digital } = deps;
+  const scanner = new DigitalScanner(db, digital);
 
   const storeOf = (id: string) =>
     DIGITAL_STORE_IDS.includes(id as DigitalStoreId) ? digital.stores[id as DigitalStoreId] : undefined;
@@ -53,6 +64,7 @@ export function createDigitalRouter(deps: DigitalRouterDeps): Router {
     try {
       const session = parseCurl(curl, registered.host);
       const expiresAt = digital.sessions.set(uid, registered.store.id, session);
+      scanner.resume(uid, registered.store.id);
       const body: StoreSessionDto = { store: registered.store.id, expiresAt: expiresAt.toISOString() };
       res.json(body);
     } catch (err) {
@@ -103,30 +115,10 @@ export function createDigitalRouter(deps: DigitalRouterDeps): Router {
     }
 
     try {
-      const result = await checkRelease(registered.store, registered.lane, session, release);
-      const row = {
-        releaseId,
-        store: registered.store.id,
-        status: result.status,
-        url: result.url,
-        tracks: result.tracks,
-        trackCount: result.trackCount,
-        checkedAt: new Date(),
-      };
-      db.insert(digitalMatches)
-        .values(row)
-        .onConflictDoUpdate({
-          target: [digitalMatches.releaseId, digitalMatches.store],
-          set: {
-            status: row.status,
-            url: row.url,
-            tracks: row.tracks,
-            trackCount: row.trackCount,
-            checkedAt: row.checkedAt,
-          },
-        })
-        .run();
-      res.json(toDigitalMatchDto(row));
+      const result = await checkRelease(registered.store, registered.lane, session, release, {
+        priority: CHECK_PRIORITY,
+      });
+      res.json(toDigitalMatchDto(saveDigitalMatch(db, releaseId, registered.store.id, result)));
     } catch (err) {
       if (err instanceof StoreSessionExpiredError) {
         digital.sessions.clear(uid, registered.store.id);
@@ -138,6 +130,57 @@ export function createDigitalRouter(deps: DigitalRouterDeps): Router {
         res.status(502).json({ error: "Couldn't check the store. Try again." });
       }
     }
+  });
+
+  const scanDto = (scan: DigitalScanRow, registered: NonNullable<ReturnType<typeof storeOf>>) =>
+    toDigitalScanDto(db, scan, registered.lane.gapMs);
+
+  router.get("/:store/scan", (req, res) => {
+    const registered = storeOf(req.params.store);
+    if (!registered) {
+      res.status(404).json({ error: "Unknown digital store" });
+      return;
+    }
+    const scan = scanner.current(req.user!.uid, registered.store.id);
+    const body: DigitalScanStatusDto = { scan: scan ? scanDto(scan, registered) : null };
+    res.set("Cache-Control", "no-store").json(body);
+  });
+
+  router.post("/:store/scan", (req, res) => {
+    const registered = storeOf(req.params.store);
+    if (!registered) {
+      res.status(404).json({ error: "Unknown digital store" });
+      return;
+    }
+    const { recheck } = (req.body ?? {}) as Partial<StartDigitalScanRequestDto>;
+    if (recheck !== undefined && typeof recheck !== "boolean") {
+      res.status(400).json({ error: "recheck must be a boolean" });
+      return;
+    }
+    const result = scanner.start(req.user!.uid, registered.store.id, recheck === true);
+    if ("conflict" in result) {
+      if (result.conflict === "scan_active") {
+        res.status(409).json({ error: "A scan of this store is already active", code: "scan_active" });
+      } else {
+        res.status(409).json(SESSION_REQUIRED);
+      }
+      return;
+    }
+    res.status(201).json(scanDto(result.scan, registered));
+  });
+
+  router.post("/:store/scan/cancel", (req, res) => {
+    const registered = storeOf(req.params.store);
+    if (!registered) {
+      res.status(404).json({ error: "Unknown digital store" });
+      return;
+    }
+    const scan = scanner.cancel(req.user!.uid, registered.store.id);
+    if (!scan) {
+      res.status(409).json({ error: "No scan of this store is active", code: "no_active_scan" });
+      return;
+    }
+    res.json(scanDto(scan, registered));
   });
 
   return router;

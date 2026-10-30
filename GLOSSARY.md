@@ -123,7 +123,7 @@ What checking one release against one **Digital store** found, stored once per r
 _Avoid_: Availability (that is Discogs copies for sale), stock, listing, release on Bandcamp
 
 **Digital scan**:
-A run that checks the wantlist items against a **Digital store**, one request at a time, 1.2 s apart. A single item can be checked on its own from its card (fader-ui#160); a scan of the whole wantlist is fader-ui#161.
+A run that checks the wantlist items against a **Digital store**, one request at a time, 1.2 s apart (fader-ui#161). It checks the items that have a release stored and no **Digital match** yet (a recheck takes the others too); **Unmatched** items are skipped and counted. A single item can also be checked on its own from its card (fader-ui#160), and that check goes ahead of the scan's next request. One scan is active per collector and store, and only the latest is kept (`digital_scans`). Its status is `running`, `paused` (the store erred; the same item is tried again after the **Pause** steps), `needs-session` (the store refused the **Store session**; it carries on from where it stopped once a fresh curl is pasted, and a server restart leaves it here too), `done`, `cancelled` or `failed`. Progress counts requests, not items: an album found costs one, a miss costs one plus one per track.
 _Avoid_: Crawl, index
 
 **Store session**:
