@@ -159,6 +159,78 @@ describe("wantlist", () => {
     expect((await asUser(app, "u1").get("/wantlist?hideNoneForSale=false")).body.total).toBe(4);
   });
 
+  describe("for-sale and price ranges", () => {
+    beforeEach(() => {
+      const price = (id: number, lowestPrice: number, lowestPriceCurrency: string) =>
+        db.update(releases).set({ lowestPrice, lowestPriceCurrency }).where(eq(releases.id, id)).run();
+      price(1, 12.5, "EUR");
+      price(2, 4.5, "EUR");
+      price(4, 30, "USD");
+    });
+    const get = (query: string) => asUser(app, "u1").get(`/wantlist?${query}`);
+
+    it("keeps the items within a for-sale range, leaving out those with no count, and counts the tab without it", async () => {
+      expect(ids((await get("minForSale=1")).body)).toEqual([2, 1]);
+      expect(ids((await get("maxForSale=1")).body)).toEqual([4, 2]);
+      const both = await get("minForSale=1&maxForSale=1");
+      expect(ids(both.body)).toEqual([2]);
+      expect(both.body).toMatchObject({ total: 1, wantlistCount: 4 });
+      expect(ids((await get("maxForSale=0")).body)).toEqual([4]);
+    });
+
+    it("keeps the items within a price range in euro, leaving out other currencies and no price", async () => {
+      expect(ids((await get("maxPrice=10")).body)).toEqual([2]);
+      expect(ids((await get("minPrice=10")).body)).toEqual([1]);
+      expect(ids((await get("minPrice=4.5&maxPrice=12.5")).body)).toEqual([2, 1]);
+      expect((await get("minPrice=0")).body.total).toBe(2);
+    });
+
+    it("follows the other filters", async () => {
+      expect(ids((await get("maxPrice=20&hideNoneForSale=true&minForSale=10")).body)).toEqual([1]);
+    });
+
+    it("rejects a bound that is not a number, is negative, or a count that is not whole", async () => {
+      for (const query of [
+        "minForSale=abc",
+        "maxForSale=-1",
+        "minForSale=1.5",
+        "minPrice=",
+        "maxPrice=-0.5",
+        "minPrice=x",
+      ]) {
+        expect((await get(query)).status, query).toBe(400);
+      }
+    });
+
+    it("rejects a minimum above its maximum", async () => {
+      expect((await get("minForSale=5&maxForSale=2")).status).toBe(400);
+      expect((await get("minPrice=9&maxPrice=3")).status).toBe(400);
+    });
+  });
+
+  describe("haveMin", () => {
+    beforeEach(() => {
+      db.update(releases).set({ haveCount: 500 }).where(eq(releases.id, 1)).run();
+      db.update(releases).set({ haveCount: 20 }).where(eq(releases.id, 2)).run();
+    });
+    const get = (query: string) => asUser(app, "u1").get(`/wantlist?${query}`);
+
+    it("keeps the items with at least that many haves, leaving out those not enriched with them, and counts the tab without it", async () => {
+      expect(ids((await get("haveMin=20")).body)).toEqual([2, 1]);
+      const res = await get("haveMin=21");
+      expect(ids(res.body)).toEqual([1]);
+      expect(res.body).toMatchObject({ total: 1, wantlistCount: 4 });
+      expect(ids((await get("haveMin=0")).body)).toEqual([2, 1]);
+    });
+
+    it("follows the other filters and rejects what is not a whole number of 0 or more", async () => {
+      expect(ids((await get("haveMin=20&minForSale=10")).body)).toEqual([1]);
+      for (const query of ["haveMin=abc", "haveMin=-1", "haveMin=1.5", "haveMin="]) {
+        expect((await get(query)).status, query).toBe(400);
+      }
+    });
+  });
+
   describe("availableOn", () => {
     const match = (releaseId: number, status: "album" | "tracks" | "none", store = "bandcamp") =>
       db

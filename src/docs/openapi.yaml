@@ -112,11 +112,17 @@ paths:
             The average rating on Discogs is at least this, from 0 to 5. The rating is only known
             for enriched releases, so this leaves out the rest.
           schema: { type: number, minimum: 0, maximum: 5 }
+        - name: haveMin
+          in: query
+          description: >
+            At least this many collectors have the release on Discogs. Haves, wants and the ratio are
+            only known for enriched releases, so using any of them leaves the others out.
+          schema: { type: integer, minimum: 0 }
         - name: haveMax
           in: query
           description: >
             At most this many collectors have the release on Discogs. Haves, wants and the ratio are
-            only known for enriched releases, so using any of the three leaves the others out.
+            only known for enriched releases, so using any of them leaves the others out.
           schema: { type: integer, minimum: 0 }
         - name: wantMin
           in: query
@@ -1026,6 +1032,40 @@ paths:
             whose count is not fetched yet stay. `total` follows the filters;
             `wantlistCount` does not.
           schema: { type: boolean, default: false }
+        - name: minForSale
+          in: query
+          description: >
+            Only the items with at least this many copies for sale. Items
+            whose count is not fetched yet are left out. `total` follows it;
+            `wantlistCount` does not.
+          schema: { type: integer, minimum: 0 }
+        - name: maxForSale
+          in: query
+          description: >
+            Only the items with at most this many copies for sale (0 keeps
+            just those with none). Items whose count is not fetched yet are
+            left out. Not below `minForSale`.
+          schema: { type: integer, minimum: 0 }
+        - name: minPrice
+          in: query
+          description: >
+            Only the items whose lowest price is at least this, in euro (the
+            currency prices are shown in). Items with no price in euro are
+            left out. `total` follows it; `wantlistCount` does not.
+          schema: { type: number, minimum: 0 }
+        - name: maxPrice
+          in: query
+          description: >
+            Only the items whose lowest price is at most this, in euro. Items
+            with no price in euro are left out. Not below `minPrice`.
+          schema: { type: number, minimum: 0 }
+        - name: haveMin
+          in: query
+          description: >
+            Only the items that at least this many collectors have on Discogs
+            (`have_count`). Items not enriched with their haves yet are left
+            out. `total` follows it; `wantlistCount` does not.
+          schema: { type: integer, minimum: 0 }
         - name: folderId
           in: query
           description: >
@@ -1060,7 +1100,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/WantlistPageDto"
         "400":
-          description: Invalid page, pageSize, sort, folderId or q, or both folderId and hideFoldered
+          description: >
+            Invalid page, pageSize, sort, folderId, q, haveMin or price/for-sale bound, a
+            minimum above its maximum, or both folderId and hideFoldered
           content:
             application/json:
               schema:

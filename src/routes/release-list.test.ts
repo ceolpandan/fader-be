@@ -171,6 +171,8 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(titles((await get("/releases?haveMax=100&wantRatioMin=2")).body)).toEqual(["Nobody", "Rare"]);
       expect(titles((await get("/releases?wantRatioMin=1.1")).body)).toEqual(["Common", "Nobody", "Rare"]);
       expect(titles((await get("/releases?wantMin=40&haveMax=100")).body)).toEqual(["Rare"]);
+      expect(titles((await get("/releases?haveMin=10")).body)).toEqual(["Common", "Rare", "Unwanted"]);
+      expect(titles((await get("/releases?haveMin=10&haveMax=100")).body)).toEqual(["Rare", "Unwanted"]);
     });
 
     it("filters by the minimum number of ratings, leaving out releases without a count", async () => {
@@ -393,6 +395,7 @@ describe("GET /releases and /releases/filter-options", () => {
       ["yearMax=1.5", "yearMax must be an integer"],
       ["ratingCountMin=-1", "ratingCountMin must be a non-negative integer"],
       ["ratingMin=6", "ratingMin must be a number from 0 to 5"],
+      ["haveMin=-1", "haveMin must be a non-negative integer"],
       ["haveMax=-1","haveMax must be a non-negative integer"],
       ["wantMin=x", "wantMin must be a non-negative integer"],
       ["wantRatioMin=0", "wantRatioMin must be a positive number"],

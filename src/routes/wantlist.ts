@@ -6,7 +6,7 @@ import { digitalMatches, releases, wantlistFolderItems, wantlistItems } from "..
 import { toDigitalMatchDto } from "../digital/digital-match-dto";
 import { DIGITAL_STORE_IDS, type DigitalStoreId } from "../digital/types";
 import { DiscogsAuthError } from "../discogs-client";
-import { shownPrice } from "../dto/price";
+import { PRICE_CURRENCY, shownPrice } from "../dto/price";
 import type {
   WantlistItemDto,
   WantlistPageDto,
@@ -42,6 +42,14 @@ function orderFor(sort: WantlistSort): SQL[] {
     case "title":
       return [asc(releases.title), asc(wantlistItems.releaseId)];
   }
+}
+
+/** A query value that is absent (undefined), a number of 0 or more (whole when `whole`), or "invalid". */
+function parseBound(value: unknown, whole: boolean): number | undefined | "invalid" {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "") return "invalid";
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && (!whole || Number.isInteger(n)) ? n : "invalid";
 }
 
 function parsePaging(req: Request): { page: number; pageSize: number } | { error: string } {
@@ -116,6 +124,29 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
       }
     }
 
+    const ranges = {
+      minForSale: parseBound(req.query.minForSale, true),
+      maxForSale: parseBound(req.query.maxForSale, true),
+      minPrice: parseBound(req.query.minPrice, false),
+      maxPrice: parseBound(req.query.maxPrice, false),
+      haveMin: parseBound(req.query.haveMin, true),
+    };
+    for (const [name, bound] of Object.entries(ranges)) {
+      if (bound === "invalid") {
+        const kind = name.endsWith("Price") ? "a number" : "a whole number";
+        res.status(400).json({ error: `${name} must be ${kind} of 0 or more` });
+        return;
+      }
+    }
+    const { minForSale, maxForSale, minPrice, maxPrice, haveMin } = ranges as Record<keyof typeof ranges, number | undefined>;
+    if (
+      (minForSale !== undefined && maxForSale !== undefined && minForSale > maxForSale) ||
+      (minPrice !== undefined && maxPrice !== undefined && minPrice > maxPrice)
+    ) {
+      res.status(400).json({ error: "A minimum cannot be above its maximum" });
+      return;
+    }
+
     const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
     if (req.query.q !== undefined && (typeof req.query.q !== "string" || search.length > MAX_SEARCH_LENGTH)) {
       res.status(400).json({ error: `q must be text of at most ${MAX_SEARCH_LENGTH} characters` });
@@ -132,6 +163,16 @@ export function createWantlistRouter(deps: WantlistRouterDeps): Router {
     }
     // Items with no count yet stay: only a count of 0 is "none for sale".
     if (hideNone) conditions.push(sql`(${releases.numForSale} IS NULL OR ${releases.numForSale} > 0)`);
+    // A range leaves out the items it cannot place: no count fetched yet, or no price in PRICE_CURRENCY.
+    if (minForSale !== undefined) conditions.push(sql`${releases.numForSale} >= ${minForSale}`);
+    if (maxForSale !== undefined) conditions.push(sql`${releases.numForSale} <= ${maxForSale}`);
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      conditions.push(sql`${releases.lowestPriceCurrency} = ${PRICE_CURRENCY}`);
+    }
+    if (minPrice !== undefined) conditions.push(sql`${releases.lowestPrice} >= ${minPrice}`);
+    if (maxPrice !== undefined) conditions.push(sql`${releases.lowestPrice} <= ${maxPrice}`);
+    // Haves come with the release's enrichment: items not enriched with them are left out.
+    if (haveMin !== undefined) conditions.push(sql`${releases.haveCount} >= ${haveMin}`);
     if (folderId !== undefined) {
       conditions.push(
         sql`EXISTS (SELECT 1 FROM ${wantlistFolderItems} WHERE ${wantlistFolderItems.uid} = ${uid} AND ${wantlistFolderItems.releaseId} = ${wantlistItems.releaseId} AND ${wantlistFolderItems.folderId} = ${folderId})`,
