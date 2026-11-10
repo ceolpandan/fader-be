@@ -218,6 +218,8 @@ export function parseReleaseQuery(
   const ratingMin = parseOptionalRating(req.query.ratingMin, "ratingMin");
   if (ratingMin.error) return { error: ratingMin.error };
 
+  const haveMin = parseOptionalCount(req.query.haveMin, "haveMin");
+  if (haveMin.error) return { error: haveMin.error };
   const haveMax = parseOptionalCount(req.query.haveMax, "haveMax");
   if (haveMax.error) return { error: haveMax.error };
   const wantMin = parseOptionalCount(req.query.wantMin, "wantMin");
@@ -288,9 +290,15 @@ export function parseReleaseQuery(
   // The average rating is only known for enriched releases, so this leaves out the rest.
   if (ratingMin.value !== undefined) filters.push(gte(releases.ratingAverage, ratingMin.value));
   // Haves and wants are only known for enriched releases, so any of these leaves out the rest.
-  if (haveMax.value !== undefined || wantMin.value !== undefined || wantRatioMin.value !== undefined) {
+  if (
+    haveMin.value !== undefined ||
+    haveMax.value !== undefined ||
+    wantMin.value !== undefined ||
+    wantRatioMin.value !== undefined
+  ) {
     filters.push(sql`${releases.haveCount} IS NOT NULL`, sql`${releases.wantCount} IS NOT NULL`);
   }
+  if (haveMin.value !== undefined) filters.push(gte(releases.haveCount, haveMin.value));
   if (haveMax.value !== undefined) filters.push(lte(releases.haveCount, haveMax.value));
   if (wantMin.value !== undefined) filters.push(gte(releases.wantCount, wantMin.value));
   // Wants per have; a release nobody has counts as one have, so it never divides by zero.
