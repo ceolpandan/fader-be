@@ -94,6 +94,18 @@ paths:
           schema:
             type: string
             enum: [only, exclude]
+        - name: noYear
+          in: query
+          description: "true keeps only releases with no year"
+          schema:
+            type: string
+            enum: ["true"]
+        - name: noCountry
+          in: query
+          description: "true keeps only releases with no country"
+          schema:
+            type: string
+            enum: ["true"]
         - name: yearMin
           in: query
           schema: { type: integer }
@@ -134,6 +146,25 @@ paths:
             At least this many wants per have (wants / max(haves, 1)), so 3 keeps releases wanted
             three times as often as they are had.
           schema: { type: number, exclusiveMinimum: 0 }
+        - name: minForSale
+          in: query
+          description: >
+            At least this many copies are for sale on Discogs. The count is only known for releases
+            fetched by the wantlist refresh, so this leaves out the rest.
+          schema: { type: integer, minimum: 0 }
+        - name: maxForSale
+          in: query
+          description: >
+            At most this many copies are for sale on Discogs (0 keeps just those with none). The count
+            is only known for releases fetched by the wantlist refresh, so this leaves out the rest.
+            Not below `minForSale`.
+          schema: { type: integer, minimum: 0 }
+        - name: maxPrice
+          in: query
+          description: >
+            The lowest price on Discogs is at most this, in euro (the currency prices are shown in).
+            Releases with no price in euro are left out.
+          schema: { type: number, minimum: 0 }
         - name: q
           in: query
           description: >
@@ -152,10 +183,11 @@ paths:
             -rarity ranks by wants per have (wants / max(haves, 1)), the most wanted first, and has no
             ascending order. Releases with no haves and wants known, or with more haves than the
             user's rarityHaveMax setting, come last.
+            styles puts the releases with the fewest styles first, and has no descending order.
           schema:
             type: string
             enum:
-              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks, versions, -versions, -rarity]
+              [title, -title, year, -year, artist, -artist, format, -format, rating, -rating, tracks, -tracks, versions, -versions, -rarity, styles]
             default: title
       responses:
         "200":

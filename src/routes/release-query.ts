@@ -1,5 +1,6 @@
-import { asc, desc, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { asc, desc, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import type { Request } from "express";
+import { PRICE_CURRENCY } from "../dto/price";
 import {
   releaseFormats,
   releaseGenres,
@@ -11,8 +12,8 @@ import {
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks", "versions"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
-// Rarity only has a descending order: the rarest releases first.
-const SORT_OPTIONS = [...SORT_FIELDS.flatMap((field) => [field, `-${field}`]), "-rarity"] as string[];
+// Rarity only has a descending order (the rarest first), and styles only an ascending one (the fewest first).
+const SORT_OPTIONS = [...SORT_FIELDS.flatMap((field) => [field, `-${field}`]), "-rarity", "styles"] as string[];
 
 function parseCommaSeparated(value: unknown): string[] {
   if (typeof value !== "string" || value.length === 0) return [];
@@ -182,6 +183,12 @@ function parseOptionalCount(value: unknown, name: string): { value?: number; err
   return parsed;
 }
 
+function parseOptionalPrice(value: unknown, name: string): { value?: number; error?: string } {
+  if (value === undefined) return {};
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? { value: parsed } : { error: `${name} must be a number of 0 or more` };
+}
+
 function parseOptionalRatio(value: unknown, name: string): { value?: number; error?: string } {
   if (value === undefined) return {};
   const parsed = Number(value);
@@ -227,12 +234,22 @@ export function parseReleaseQuery(
   const wantRatioMin = parseOptionalRatio(req.query.wantRatioMin, "wantRatioMin");
   if (wantRatioMin.error) return { error: wantRatioMin.error };
 
+  const minForSale = parseOptionalCount(req.query.minForSale, "minForSale");
+  if (minForSale.error) return { error: minForSale.error };
+  const maxForSale = parseOptionalCount(req.query.maxForSale, "maxForSale");
+  if (maxForSale.error) return { error: maxForSale.error };
+  if (minForSale.value !== undefined && maxForSale.value !== undefined && minForSale.value > maxForSale.value) {
+    return { error: "minForSale cannot be above maxForSale" };
+  }
+  const maxPrice = parseOptionalPrice(req.query.maxPrice, "maxPrice");
+  if (maxPrice.error) return { error: maxPrice.error };
+
   const sortParam =(req.query.sort as string | undefined) ?? "title";
   if (!SORT_OPTIONS.includes(sortParam)) {
     return { error: `sort must be one of ${SORT_OPTIONS.join(", ")}` };
   }
   const isDescending = sortParam.startsWith("-");
-  const sortField = (isDescending ? sortParam.slice(1) : sortParam) as SortField | "rarity";
+  const sortField = (isDescending ? sortParam.slice(1) : sortParam) as SortField | "rarity" | "styles";
 
   const genre = parseCommaSeparated(req.query.genre);
   const style = parseCommaSeparated(req.query.style);
@@ -253,6 +270,11 @@ export function parseReleaseQuery(
   if (noLinks !== undefined && noLinks !== "only" && noLinks !== "exclude") {
     return { error: "noLinks must be one of only, exclude" };
   }
+
+  const noYear = req.query.noYear;
+  if (noYear !== undefined && noYear !== "true") return { error: "noYear must be true" };
+  const noCountry = req.query.noCountry;
+  if (noCountry !== undefined && noCountry !== "true") return { error: "noCountry must be true" };
 
   const scrape = parseOptionalInt(req.query.scrape, "scrape");
   if (scrape.error) return { error: scrape.error };
@@ -283,6 +305,9 @@ export function parseReleaseQuery(
   // A release has no links when it has no video links.
   if (noLinks === "only") filters.push(sql`json_array_length(${releases.videos}) = 0`);
   if (noLinks === "exclude") filters.push(sql`json_array_length(${releases.videos}) > 0`);
+  // Some releases have no year or no country; these keep only those.
+  if (noYear === "true") filters.push(isNull(releases.year));
+  if (noCountry === "true") filters.push(isNull(releases.country));
   if (yearMin.value !== undefined) filters.push(gte(releases.year, yearMin.value));
   if (yearMax.value !== undefined) filters.push(lte(releases.year, yearMax.value));
   // The rating count is only known for enriched releases, so this leaves out the rest.
@@ -306,6 +331,14 @@ export function parseReleaseQuery(
     filters.push(sql`${releases.wantCount} >= ${wantRatioMin.value} * MAX(${releases.haveCount}, 1)`);
   }
 
+  // The count and the price come from the wantlist refresh, so these leave out releases it has not fetched.
+  if (minForSale.value !== undefined) filters.push(gte(releases.numForSale, minForSale.value));
+  if (maxForSale.value !== undefined) filters.push(lte(releases.numForSale, maxForSale.value));
+  // Only a price in PRICE_CURRENCY is comparable, so a price in another currency is left out too.
+  if (maxPrice.value !== undefined) {
+    filters.push(sql`${releases.lowestPriceCurrency} = ${PRICE_CURRENCY}`, lte(releases.lowestPrice, maxPrice.value));
+  }
+
   const styleCombinations = styleCombinationsFilter({
     include: mergeStyles ? dedupeCombinations([...style.map((s) => [s]), ...includeCombinations]) : includeCombinations,
     only: parseStyleCombinations(req.query.onlyStyleCombo),
@@ -318,6 +351,12 @@ export function parseReleaseQuery(
     const unranked = sql`(${releases.haveCount} IS NULL OR ${releases.wantCount} IS NULL OR ${releases.haveCount} > ${rarityHaveMax})`;
     const ratio = sql`${releases.wantCount} * 1.0 / MAX(${releases.haveCount}, 1)`;
     const orderBy = [unranked, sql`${ratio} DESC`, desc(releases.wantCount), asc(releases.title), sql`${releases.id}`];
+    return { query: { page, pageSize, filters, styleCombinations, orderBy } };
+  }
+
+  if (sortField === "styles") {
+    // The fewest styles first; ties fall back to the title.
+    const orderBy = [sql`json_array_length(${releases.styles})`, asc(releases.title), sql`${releases.id}`];
     return { query: { page, pageSize, filters, styleCombinations, orderBy } };
   }
 

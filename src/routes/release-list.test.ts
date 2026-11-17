@@ -54,7 +54,7 @@ describe("GET /releases and /releases/filter-options", () => {
         title,
         videos: overrides.videos ?? [],
         tracklist: overrides.tracklist ?? [],
-        year: overrides.year ?? 2000,
+        year: "year" in overrides ? overrides.year : 2000,
         country: overrides.country ?? null,
         genres: overrides.genres ?? [],
         styles: overrides.styles ?? [],
@@ -129,6 +129,20 @@ describe("GET /releases and /releases/filter-options", () => {
       expect((await get("/releases?noLinks=maybe")).status).toBe(400);
     });
 
+    it("filters by noYear and noCountry: only keeps releases with no year or no country", async () => {
+      seedRelease(1, "Full", { year: 1990, country: "UK" });
+      seedRelease(2, "No year", { year: null, country: "UK" });
+      seedRelease(3, "No country", { year: 1990, country: null });
+      seedRelease(4, "Neither", { year: null, country: null });
+
+      expect(titles((await get("/releases?noYear=true")).body)).toEqual(["Neither", "No year"]);
+      expect(titles((await get("/releases?noCountry=true")).body)).toEqual(["Neither", "No country"]);
+      expect(titles((await get("/releases?noYear=true&noCountry=true")).body)).toEqual(["Neither"]);
+      expect(titles((await get("/releases?noYear=true&country=UK")).body)).toEqual(["No year"]);
+      expect((await get("/releases?noYear=false")).status).toBe(400);
+      expect((await get("/releases?noCountry=1")).status).toBe(400);
+    });
+
     it("filters by genre, style, format, country and year", async () => {
       seedRelease(1, "A", { genres: ["Rock"], styles: ["Punk"], formats: format("Vinyl"), country: "UK", year: 1977 });
       seedRelease(2, "B", { genres: ["Jazz"], styles: ["Bop"], formats: format("CD"), country: "US", year: 1999 });
@@ -173,6 +187,25 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(titles((await get("/releases?wantMin=40&haveMax=100")).body)).toEqual(["Rare"]);
       expect(titles((await get("/releases?haveMin=10")).body)).toEqual(["Common", "Rare", "Unwanted"]);
       expect(titles((await get("/releases?haveMin=10&haveMax=100")).body)).toEqual(["Rare", "Unwanted"]);
+    });
+
+    it("filters by copies for sale and the highest price, leaving out releases without them", async () => {
+      for (const [id, title] of [[1, "Cheap"], [2, "Dear"], [3, "None"], [4, "Dollars"], [5, "Never fetched"]] as const) {
+        seedRelease(id, title);
+      }
+      const offer = (id: number, numForSale: number, lowestPrice: number | null, lowestPriceCurrency: string | null) =>
+        db.update(releases).set({ numForSale, lowestPrice, lowestPriceCurrency }).where(eq(releases.id, id)).run();
+      offer(1, 2, 8.5, "EUR");
+      offer(2, 30, 60, "EUR");
+      offer(3, 0, null, null);
+      offer(4, 5, 4, "USD");
+
+      expect(titles((await get("/releases?minForSale=1")).body)).toEqual(["Cheap", "Dear", "Dollars"]);
+      expect(titles((await get("/releases?maxForSale=2")).body)).toEqual(["Cheap", "None"]);
+      expect(titles((await get("/releases?maxForSale=0")).body)).toEqual(["None"]);
+      expect(titles((await get("/releases?minForSale=2&maxForSale=5")).body)).toEqual(["Cheap", "Dollars"]);
+      expect(titles((await get("/releases?maxPrice=10")).body)).toEqual(["Cheap"]);
+      expect(titles((await get("/releases?maxPrice=60")).body)).toEqual(["Cheap", "Dear"]);
     });
 
     it("filters by the minimum number of ratings, leaving out releases without a count", async () => {
@@ -292,6 +325,16 @@ describe("GET /releases and /releases/filter-options", () => {
       expect((await get("/releases?sort=rarity")).status).toBe(400);
     });
 
+    it("sorts by style count, fewest first, with no descending order", async () => {
+      seedRelease(1, "Three", { styles: ["A", "B", "C"] });
+      seedRelease(2, "One", { styles: ["A"] });
+      seedRelease(3, "Two B", { styles: ["A", "B"] });
+      seedRelease(4, "Two A", { styles: ["C", "D"] });
+
+      expect(titles((await get("/releases?sort=styles")).body)).toEqual(["One", "Two A", "Two B", "Three"]);
+      expect((await get("/releases?sort=-styles")).status).toBe(400);
+    });
+
     it("sorts by version count, counting the releases under the same master (1 without one)", async () => {
       seedRelease(1, "Solo");
       seedRelease(2, "Pair A", { masterId: 20 });
@@ -399,6 +442,11 @@ describe("GET /releases and /releases/filter-options", () => {
       ["haveMax=-1","haveMax must be a non-negative integer"],
       ["wantMin=x", "wantMin must be a non-negative integer"],
       ["wantRatioMin=0", "wantRatioMin must be a positive number"],
+      ["minForSale=-1", "minForSale must be a non-negative integer"],
+      ["maxForSale=1.5", "maxForSale must be a non-negative integer"],
+      ["minForSale=5&maxForSale=2", "minForSale cannot be above maxForSale"],
+      ["maxPrice=-1", "maxPrice must be a number of 0 or more"],
+      ["maxPrice=x", "maxPrice must be a number of 0 or more"],
       ["sort=bogus", "sort must be one of"],
     ])("400s on %s", async (query, message) => {
       const res = await get(`/releases?${query}`);
