@@ -1937,7 +1937,7 @@ components:
     ReleaseListItemDto:
       type: object
       required:
-        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, thumb, artists, labels, versionCount]
+        [releaseId, title, year, country, genres, styles, formats, ratingAverage, ratingCount, thumb, artists, labels, versionCount, inWantlist]
       properties:
         releaseId: { type: integer }
         title: { type: string }
@@ -1974,6 +1974,9 @@ components:
           type: integer
           minimum: 1
           description: Stored releases under the same master, this one included (1 without a master). What fading its master clears.
+        inWantlist:
+          type: boolean
+          description: The release is on the signed-in user's wantlist, as the last sync saw it.
 
     ReleaseLabelDto:
       type: object

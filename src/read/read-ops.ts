@@ -2,7 +2,7 @@ import { and, sql, type SQL } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { isFadedViaFades, isNotFadedFor } from "../db/fades";
 import { isNotMissing } from "../db/missing";
-import { releases } from "../db/schema";
+import { releases, wantlistItems } from "../db/schema";
 import type { ReleaseListPageDto } from "../dto/release-list.dto";
 import { previewRun, type RunPreview, type RunScopeError } from "../enrichment/enrichment-run";
 import { parseReleaseQuery } from "../routes/release-query";
@@ -47,6 +47,9 @@ function listReleases(db: Db, input: { query: Record<string, unknown>; uid: stri
       artists: releases.artists,
       labels: releases.labels,
       versionCount: releases.versionCount,
+      inWantlist: sql<boolean>`EXISTS (SELECT 1 FROM ${wantlistItems} WHERE ${wantlistItems.uid} = ${uid} AND ${wantlistItems.releaseId} = ${releases.id})`.mapWith(
+        Boolean,
+      ),
     })
     .from(releases)
     .where(and(isNotMissing, isNotFadedFor(uid), ...filters))

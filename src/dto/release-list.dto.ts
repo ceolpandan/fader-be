@@ -26,6 +26,8 @@ export interface ReleaseListItemDto {
   labels: ReleaseLabel[];
   /** Stored releases under the same master, this one included (1 without a master): what fading its master clears. */
   versionCount: number;
+  /** The release is on the signed-in user's wantlist, as the last sync saw it. */
+  inWantlist: boolean;
 }
 
 export interface ReleaseListPageDto {

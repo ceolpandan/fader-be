@@ -9,7 +9,7 @@ import { eq, inArray } from "drizzle-orm";
 import { createDb, type Db } from "../db/client";
 import { rebuildFilterOptions } from "../db/filter-options";
 import { refreshVersionCounts } from "../db/version-counts";
-import { fades, releases, userSettings } from "../db/schema";
+import { fades, releases, userSettings, wantlistItems } from "../db/schema";
 import { DiscogsQueue } from "../queue/discogs-queue";
 import { createApp } from "../app";
 
@@ -116,8 +116,27 @@ describe("GET /releases and /releases/filter-options", () => {
           artists: [{ id: 7, name: "Band" }],
           labels: [],
           versionCount: 1,
+          inWantlist: false,
         },
       ]);
+    });
+
+    it("marks the releases on the signed-in user's wantlist, and no one else's", async () => {
+      seedRelease(1, "Wanted");
+      seedRelease(2, "Not wanted");
+      seedRelease(3, "Wanted by someone else");
+      db.insert(wantlistItems)
+        .values([
+          { uid: "test-uid", releaseId: 1, title: "Wanted", artists: [] },
+          { uid: "someone-else", releaseId: 3, title: "Wanted by someone else", artists: [] },
+        ])
+        .run();
+
+      const res = await get("/releases");
+      const flags = Object.fromEntries(
+        res.body.items.map((item: { title: string; inWantlist: boolean }) => [item.title, item.inWantlist]),
+      );
+      expect(flags).toEqual({ Wanted: true, "Not wanted": false, "Wanted by someone else": false });
     });
 
     it("filters by noLinks: only keeps releases without video links, exclude drops them", async () => {
