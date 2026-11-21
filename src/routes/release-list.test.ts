@@ -225,6 +225,9 @@ describe("GET /releases and /releases/filter-options", () => {
       expect(titles((await get("/releases?minForSale=2&maxForSale=5")).body)).toEqual(["Cheap", "Dollars"]);
       expect(titles((await get("/releases?maxPrice=10")).body)).toEqual(["Cheap"]);
       expect(titles((await get("/releases?maxPrice=60")).body)).toEqual(["Cheap", "Dear"]);
+      expect(titles((await get("/releases?minPrice=10")).body)).toEqual(["Dear"]);
+      expect(titles((await get("/releases?minPrice=0")).body)).toEqual(["Cheap", "Dear"]);
+      expect(titles((await get("/releases?minPrice=5&maxPrice=10")).body)).toEqual(["Cheap"]);
     });
 
     it("filters by the minimum number of ratings, leaving out releases without a count", async () => {
@@ -466,6 +469,9 @@ describe("GET /releases and /releases/filter-options", () => {
       ["minForSale=5&maxForSale=2", "minForSale cannot be above maxForSale"],
       ["maxPrice=-1", "maxPrice must be a number of 0 or more"],
       ["maxPrice=x", "maxPrice must be a number of 0 or more"],
+      ["minPrice=-1", "minPrice must be a number of 0 or more"],
+      ["minPrice=x", "minPrice must be a number of 0 or more"],
+      ["minPrice=9&maxPrice=3", "minPrice cannot be above maxPrice"],
       ["sort=bogus", "sort must be one of"],
     ])("400s on %s", async (query, message) => {
       const res = await get(`/releases?${query}`);

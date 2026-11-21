@@ -159,11 +159,17 @@ paths:
             is only known for releases fetched by the wantlist refresh, so this leaves out the rest.
             Not below `minForSale`.
           schema: { type: integer, minimum: 0 }
+        - name: minPrice
+          in: query
+          description: >
+            The lowest price on Discogs is at least this, in euro (the currency prices are shown in).
+            Releases with no price in euro are left out.
+          schema: { type: number, minimum: 0 }
         - name: maxPrice
           in: query
           description: >
             The lowest price on Discogs is at most this, in euro (the currency prices are shown in).
-            Releases with no price in euro are left out.
+            Releases with no price in euro are left out. Not below `minPrice`.
           schema: { type: number, minimum: 0 }
         - name: q
           in: query

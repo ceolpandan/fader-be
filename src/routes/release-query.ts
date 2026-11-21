@@ -241,8 +241,13 @@ export function parseReleaseQuery(
   if (minForSale.value !== undefined && maxForSale.value !== undefined && minForSale.value > maxForSale.value) {
     return { error: "minForSale cannot be above maxForSale" };
   }
+  const minPrice = parseOptionalPrice(req.query.minPrice, "minPrice");
+  if (minPrice.error) return { error: minPrice.error };
   const maxPrice = parseOptionalPrice(req.query.maxPrice, "maxPrice");
   if (maxPrice.error) return { error: maxPrice.error };
+  if (minPrice.value !== undefined && maxPrice.value !== undefined && minPrice.value > maxPrice.value) {
+    return { error: "minPrice cannot be above maxPrice" };
+  }
 
   const sortParam =(req.query.sort as string | undefined) ?? "title";
   if (!SORT_OPTIONS.includes(sortParam)) {
@@ -335,9 +340,11 @@ export function parseReleaseQuery(
   if (minForSale.value !== undefined) filters.push(gte(releases.numForSale, minForSale.value));
   if (maxForSale.value !== undefined) filters.push(lte(releases.numForSale, maxForSale.value));
   // Only a price in PRICE_CURRENCY is comparable, so a price in another currency is left out too.
-  if (maxPrice.value !== undefined) {
-    filters.push(sql`${releases.lowestPriceCurrency} = ${PRICE_CURRENCY}`, lte(releases.lowestPrice, maxPrice.value));
+  if (minPrice.value !== undefined || maxPrice.value !== undefined) {
+    filters.push(sql`${releases.lowestPriceCurrency} = ${PRICE_CURRENCY}`);
   }
+  if (minPrice.value !== undefined) filters.push(gte(releases.lowestPrice, minPrice.value));
+  if (maxPrice.value !== undefined) filters.push(lte(releases.lowestPrice, maxPrice.value));
 
   const styleCombinations = styleCombinationsFilter({
     include: mergeStyles ? dedupeCombinations([...style.map((s) => [s]), ...includeCombinations]) : includeCombinations,
