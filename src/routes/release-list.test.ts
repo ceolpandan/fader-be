@@ -402,6 +402,21 @@ describe("GET /releases and /releases/filter-options", () => {
       ]);
     });
 
+    it("filters by version count, both ends included", async () => {
+      seedRelease(1, "Solo");
+      seedRelease(2, "Pair A", { masterId: 20 });
+      seedRelease(3, "Pair B", { masterId: 20 });
+      seedRelease(4, "Trio A", { masterId: 30 });
+      seedRelease(5, "Trio B", { masterId: 30 });
+      seedRelease(6, "Trio C", { masterId: 30 });
+      refreshVersionCounts(db.$client);
+
+      expect(titles((await get("/releases?maxVersions=1")).body)).toEqual(["Solo"]);
+      expect(titles((await get("/releases?minVersions=3")).body)).toEqual(["Trio A", "Trio B", "Trio C"]);
+      expect(titles((await get("/releases?minVersions=2&maxVersions=2")).body)).toEqual(["Pair A", "Pair B"]);
+      expect(titles((await get("/releases?maxVersions=0")).body)).toEqual([]);
+    });
+
     it("refreshes version counts after releases are removed", () => {
       seedRelease(1, "A", { masterId: 5 });
       seedRelease(2, "B", { masterId: 5 });
@@ -495,6 +510,9 @@ describe("GET /releases and /releases/filter-options", () => {
       ["minPrice=-1", "minPrice must be a number of 0 or more"],
       ["minPrice=x", "minPrice must be a number of 0 or more"],
       ["minPrice=9&maxPrice=3", "minPrice cannot be above maxPrice"],
+      ["minVersions=-1", "minVersions must be a non-negative integer"],
+      ["maxVersions=1.5", "maxVersions must be a non-negative integer"],
+      ["minVersions=5&maxVersions=2", "minVersions cannot be above maxVersions"],
       ["sort=bogus", "sort must be one of"],
     ])("400s on %s", async (query, message) => {
       const res = await get(`/releases?${query}`);

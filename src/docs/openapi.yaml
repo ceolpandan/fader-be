@@ -177,6 +177,18 @@ paths:
             The lowest price on Discogs is at most this, in euro (the currency prices are shown in).
             Releases with no price in euro are left out. Not below `minPrice`.
           schema: { type: number, minimum: 0 }
+        - name: minVersions
+          in: query
+          description: >
+            At least this version count: how many stored releases share the release's master (1
+            without a master). Not the number of versions on Discogs.
+          schema: { type: integer, minimum: 0 }
+        - name: maxVersions
+          in: query
+          description: >
+            At most this version count (1 keeps releases with no other stored version). Not below
+            `minVersions`.
+          schema: { type: integer, minimum: 0 }
         - name: q
           in: query
           description: >

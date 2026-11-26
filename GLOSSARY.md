@@ -21,7 +21,7 @@ The Discogs grouping of all versions of the same work. A release belongs to at m
 _Avoid_: Album, group
 
 **Version count**:
-How many stored releases share a release's master (1 without a master), which is how many releases fading its master clears. Stored on the release (`version_count`) and counted by the importer, not by Discogs. Explore sorts by it with `sort=-versions`.
+How many stored releases share a release's master (1 without a master), which is how many releases fading its master clears. Stored on the release (`version_count`) and counted by the importer, not by Discogs. Explore sorts by it with `sort=-versions` and filters on it with `minVersions` and `maxVersions`.
 _Avoid_: Edition count, master size
 
 **Release detail**:
