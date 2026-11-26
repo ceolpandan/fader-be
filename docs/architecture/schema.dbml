@@ -88,6 +88,67 @@ table filter_options {
   }
 }
 
+table sellers {
+  username text [pk, not null]
+  last_indexed_at integer
+  last_index_status text [not null]
+  current_run_id text
+  run_uid text
+  seller_rating real
+  seller_num_ratings integer
+  ships_from_country text
+  avatar_url text
+  inventory_total integer
+  scan_pages_total integer
+  scan_pages_fetched integer [not null, default: 0]
+  scan_completed_at integer
+}
+
+table seller_inventory {
+  seller_username text [not null]
+  release_id integer [not null]
+  status text [not null]
+  first_seen_at integer [not null]
+  last_seen_at integer [not null]
+  sold_at integer
+
+  indexes {
+    (seller_username, release_id) [pk]
+    release_id [name: 'seller_inventory_release_idx']
+  }
+}
+
+table scan_passes {
+  id integer [pk, not null, increment]
+  run_id text [not null]
+  seller_username text [not null]
+  sort text [not null]
+  order text [not null]
+  pages_planned integer [not null]
+  pages_fetched integer [not null, default: 0]
+  items_seen integer [not null, default: 0]
+  items_new integer [not null, default: 0]
+  status text [not null]
+  started_at integer [not null]
+  ended_at integer
+
+  indexes {
+    (run_id, sort, order) [name: 'scan_passes_run_sort_order_idx', unique]
+  }
+}
+
+table scan_listings {
+  run_id text [not null]
+  seller_username text [not null]
+  sort text [not null]
+  order text [not null]
+  listing_id integer [not null]
+
+  indexes {
+    (run_id, sort, order, listing_id) [pk]
+  }
+}
+
 table discogs_queue_jobs {
   id integer [pk, not null, increment]
   uid text [not null, default: '']

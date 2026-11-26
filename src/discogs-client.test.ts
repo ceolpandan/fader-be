@@ -1,5 +1,18 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getCollectionCount, getCollectionPage, getRelease, getWantlistPage, getWantlistCount, searchFirstReleaseId, DiscogsAuthError, DiscogsNotFoundError, DiscogsRateLimitError } from "./discogs-client";
+import {
+  getCollectionCount,
+  getCollectionPage,
+  getInventory,
+  getRelease,
+  getUserProfile,
+  getWantlistPage,
+  getWantlistCount,
+  searchFirstReleaseId,
+  DiscogsAuthError,
+  DiscogsNotFoundError,
+  DiscogsPaginationCapError,
+  DiscogsRateLimitError,
+} from "./discogs-client";
 
 function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
   return {
@@ -177,5 +190,44 @@ describe("searchFirstReleaseId", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { results: [] })));
 
     expect(await searchFirstReleaseId("zzzz", "tok")).toBeNull();
+  });
+});
+
+describe("seller reads", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("asks for a page of the seller's inventory in the given sort, with the collector's token", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { pagination: {}, listings: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getInventory("some seller", 3, { sort: "listed", order: "desc" }, "tok");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.discogs.com/users/some%20seller/inventory?page=3&per_page=100&sort=listed&sort_order=desc",
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Discogs token=tok" }) }),
+    );
+  });
+
+  it("reads a user's profile", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { username: "FooBar", seller_rating: 99.1 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await getUserProfile("foobar", "tok")).toMatchObject({ username: "FooBar" });
+    expect(fetchMock).toHaveBeenCalledWith("https://api.discogs.com/users/foobar", expect.anything());
+  });
+
+  it("tells Discogs' pagination cap, a 403, from a refused token", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, "Pagination above 100 disabled for inventory")),
+    );
+    await expect(getInventory("s", 101, { sort: "artist", order: "asc" }, "tok")).rejects.toThrow(
+      DiscogsPaginationCapError,
+    );
+
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(403, { message: "You are not allowed to do this" })));
+    await expect(getInventory("s", 1, { sort: "artist", order: "asc" }, "tok")).rejects.toThrow(DiscogsAuthError);
   });
 });

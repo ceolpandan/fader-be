@@ -1,14 +1,18 @@
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, not, or, sql } from "drizzle-orm";
 import { Router } from "express";
 import type { Db } from "../db/client";
 import { hasDiscogsToken } from "../db/discogs-tokens";
+import { isCoveredByFadeFor } from "../db/fades";
 import {
+  discogsQueueJobs,
   fades,
   masterVersions,
   releases,
+  sellerInventory,
   type FadeKind,
   type FadeLookupStatus,
   type ReleaseArtistStub,
+  type ReleaseDetailPayload,
 } from "../db/schema";
 import type {
   FadedIdsDto,
@@ -17,6 +21,7 @@ import type {
   FadeRequestDto,
   FadeResponseDto,
 } from "../dto/fade.dto";
+import { needsDetail } from "../indexing/needs-detail";
 import { enqueueFadeLookup, hasStoredVersions, takeUpgradedMaster } from "../indexing/fade-lookup-handler";
 import type { DiscogsQueue } from "../queue/discogs-queue";
 import { highlightId, logger } from "../util/logger";
@@ -82,6 +87,52 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
     return version
       ? { kind: "master", id: version.masterId, resolved: true }
       : { kind: "release", id: parsed.releaseId, resolved: false };
+  }
+
+  /**
+   * Releases a fade used to cover were skipped by a seller scan's enrichment. Those that sit in a
+   * seller's inventory without a `releases` row, and that no remaining fade of this collector
+   * covers, go back on the queue (unless already queued).
+   */
+  function requeueEnrichment(uid: string, target: { kind: FadeKind; id: number }): void {
+    const covered = deps.db
+      .selectDistinct({ releaseId: sellerInventory.releaseId })
+      .from(sellerInventory)
+      .where(
+        and(
+          target.kind === "release"
+            ? eq(sellerInventory.releaseId, target.id)
+            : inArray(
+                sellerInventory.releaseId,
+                deps.db
+                  .select({ releaseId: masterVersions.releaseId })
+                  .from(masterVersions)
+                  .where(eq(masterVersions.masterId, target.id)),
+              ),
+          needsDetail(sellerInventory.releaseId),
+          not(isCoveredByFadeFor(uid, sellerInventory.releaseId)),
+        ),
+      )
+      .all();
+    if (covered.length === 0) return;
+
+    const queued = new Set(
+      deps.db
+        .select({ payload: discogsQueueJobs.payload })
+        .from(discogsQueueJobs)
+        .where(
+          and(
+            eq(discogsQueueJobs.type, "release_detail"),
+            inArray(discogsQueueJobs.status, ["pending", "processing"]),
+          ),
+        )
+        .all()
+        .map((job) => (job.payload as ReleaseDetailPayload).releaseId),
+    );
+    for (const { releaseId } of covered) {
+      if (queued.has(releaseId)) continue;
+      deps.queue.enqueue({ runId: `unfade:${uid}`, type: "release_detail", payload: { uid, releaseId } });
+    }
   }
 
   router.get("/", (req, res) => {
@@ -337,10 +388,12 @@ export function createFadeRouter(deps: FadeRouterDeps): Router {
     const uid = req.user!.uid;
     const target = resolveFade(parsed);
 
-    deps.db
+    const removed = deps.db
       .delete(fades)
       .where(and(eq(fades.uid, uid), eq(fades.kind, target.kind), eq(fades.id, target.id)))
-      .run();
+      .returning()
+      .all();
+    if (removed.length > 0 && hasDiscogsToken(deps.db, uid)) requeueEnrichment(uid, target);
 
     logger.info(`Unfaded ${target.kind} ${highlightId(target.id)}`);
     res.status(204).end();

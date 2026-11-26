@@ -21,6 +21,7 @@ import { createMastersRouter } from "./routes/masters";
 import { createReleasesRouter } from "./routes/releases";
 import { createSavedFiltersRouter } from "./routes/saved-filters";
 import { createScrapesRouter } from "./routes/scrapes";
+import { createSellersRouter } from "./routes/sellers";
 import { createSettingsRouter } from "./routes/settings";
 import { logger } from "./util/logger";
 
@@ -70,6 +71,7 @@ export function createApp(appDeps: AppDeps): Express {
   app.use("/fade", createFadeRouter(deps));
   app.use("/saved-filters", createSavedFiltersRouter(deps));
   app.use("/scrapes", createScrapesRouter(deps));
+  app.use("/sellers", createSellersRouter(deps));
   app.use("/me/discogs-profile", createDiscogsProfileRouter(deps));
   app.use("/digital", createDigitalRouter(deps));
   app.use("/wantlist/folders", createWantlistFoldersRouter(deps));

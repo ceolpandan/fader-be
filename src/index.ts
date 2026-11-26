@@ -8,8 +8,10 @@ import {
   getAllMasterVersionReleaseIds,
   getCollectionCount,
   getCollectionPage,
+  getInventory,
   getRelease,
   getUserCurrency,
+  getUserProfile,
   deleteWantlistItem,
   getWantlistCount,
   getWantlistPage,
@@ -20,7 +22,11 @@ import { failRun, finishRunsWithNothingLeft, finishRunWhenSettled } from "./enri
 import { createDiscogsProfileHandler } from "./indexing/discogs-profile-handler";
 import { createDiscogsSyncHandler } from "./indexing/discogs-sync-handler";
 import { createFadeLookupHandler, markFadeLookupFailed } from "./indexing/fade-lookup-handler";
+import { createInventoryPageHandler } from "./indexing/inventory-page-handler";
 import { createReleaseDetailHandler } from "./indexing/release-detail-handler";
+import { checkRunCompletion, failOrphanedRuns, markRunAborted } from "./indexing/run-completion";
+import { createSellerProfileHandler } from "./indexing/seller-profile-handler";
+import { startSoldInventoryPurgeLoop } from "./indexing/sold-inventory-purge";
 import { createWantlistRemoveHandler } from "./indexing/wantlist-remove-handler";
 import { DiscogsQueue } from "./queue/discogs-queue";
 import { createWorkerReadRunner } from "./read/read-runner";
@@ -84,20 +90,45 @@ queue.registerHandler(
   "wantlist_remove",
   createWantlistRemoveHandler({ db, getToken: (uid) => getDiscogsToken(db, uid), deleteWantlistItem }),
 );
+queue.registerHandler(
+  "inventory_page",
+  createInventoryPageHandler({
+    db,
+    enqueue: (job) => queue.enqueue(job),
+    getToken: (uid) => getDiscogsToken(db, uid),
+    getInventory,
+    getUserProfile,
+  }),
+);
+queue.registerHandler(
+  "seller_profile",
+  createSellerProfileHandler({
+    db,
+    enqueue: (job) => queue.enqueue(job),
+    getToken: (uid) => getDiscogsToken(db, uid),
+    getUserProfile,
+  }),
+);
 queue.onSettled((job) => markFadeLookupFailed(db, job));
 queue.registerHandler(
   "scrape_search",
   createScrapeSearchHandler({ db, queue, getToken: (uid) => getDiscogsToken(db, uid), searchFirstReleaseId }),
 );
 queue.onSettled((job) => finishRunWhenSettled(db, job));
+queue.onSettled((job) => checkRunCompletion(db, job.runId));
 queue.onSettled((job) => settleScrapeSearch(db, job));
 queue.onRunAborted((runId, cause) => failRun(db, runId, cause));
 queue.onRunAborted((runId) => failScrapeSearches(db, runId));
+queue.onRunAborted((runId) => markRunAborted(db, runId));
 // Runs and their jobs are stored, so a run the server stopped in the middle of carries on.
 finishRunsWithNothingLeft(db);
 // A digital scan the server stopped lost its curl with it, so it waits for a fresh one.
 settleScansAfterRestart(db);
 queue.start();
+// A seller still `running` with no job left (the server stopped mid-start) could never be indexed again.
+const orphaned = failOrphanedRuns(db);
+if (orphaned > 0) logger.warn(`Marked ${orphaned} orphaned running seller(s) as error`);
+startSoldInventoryPurgeLoop(db);
 
 const readRunner = createWorkerReadRunner(dbPath, Number(process.env.READ_WORKERS) || 2);
 const app = createApp({ db, queue, readRunner });

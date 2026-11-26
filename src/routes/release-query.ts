@@ -8,6 +8,7 @@ import {
   releases,
   scrapeReleases,
   scrapes,
+  sellerInventory,
 } from "../db/schema";
 
 const SORT_FIELDS = ["title", "year", "artist", "format", "rating", "tracks", "versions"] as const;
@@ -123,6 +124,11 @@ function searchFilter(text: string): SQL {
 /** The release is one the collector's own scrape matched; another collector's scrape matches nothing. */
 function scrapeFilter(scrapeId: number, uid: string): SQL {
   return sql`EXISTS (SELECT 1 FROM ${scrapeReleases} JOIN ${scrapes} ON ${scrapes.id} = ${scrapeReleases.scrapeId} WHERE ${scrapeReleases.releaseId} = ${releases.id} AND ${scrapeReleases.scrapeId} = ${scrapeId} AND ${scrapes.uid} = ${uid})`;
+}
+
+/** The release is one the indexed seller lists for sale now (a sold or withdrawn one is not). */
+function sellerFilter(username: string): SQL {
+  return sql`${releases.id} IN (SELECT ${sellerInventory.releaseId} FROM ${sellerInventory} WHERE ${sellerInventory.sellerUsername} = ${username} AND ${sellerInventory.status} = 'active')`;
 }
 
 const TRACK_COUNT_OPTIONS =["1", "2", "3", "4", "5", "6", "7+"];
@@ -280,9 +286,14 @@ export function parseReleaseQuery(
   if (noYear !== undefined && noYear !== "true") return { error: "noYear must be true" };
   const noCountry = req.query.noCountry;
   if (noCountry !== undefined && noCountry !== "true") return { error: "noCountry must be true" };
+  const noStyles = req.query.noStyles;
+  if (noStyles !== undefined && noStyles !== "true") return { error: "noStyles must be true" };
 
   const scrape = parseOptionalInt(req.query.scrape, "scrape");
   if (scrape.error) return { error: scrape.error };
+
+  const seller = typeof req.query.seller === "string" ? req.query.seller.trim() : "";
+  if (seller.length > MAX_SEARCH_LENGTH) return { error: `seller must be at most ${MAX_SEARCH_LENGTH} characters` };
 
   const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (search.length > MAX_SEARCH_LENGTH) return { error: `q must be at most ${MAX_SEARCH_LENGTH} characters` };
@@ -290,6 +301,7 @@ export function parseReleaseQuery(
   const filters: SQL[] = [];
   if (search.length > 0) filters.push(searchFilter(search));
   if (scrape.value !== undefined) filters.push(scrapeFilter(scrape.value, uid));
+  if (seller.length > 0) filters.push(sellerFilter(seller));
   if (genre.length > 0) filters.push(hasAny("genre", genre));
   // With include combinations given, the included styles join them as one-style combinations (an OR);
   // without, they stay a plain filter, which the facets count.
@@ -310,9 +322,12 @@ export function parseReleaseQuery(
   // A release has no links when it has no video links.
   if (noLinks === "only") filters.push(sql`json_array_length(${releases.videos}) = 0`);
   if (noLinks === "exclude") filters.push(sql`json_array_length(${releases.videos}) > 0`);
-  // Some releases have no year or no country; these keep only those.
-  if (noYear === "true") filters.push(isNull(releases.year));
-  if (noCountry === "true") filters.push(isNull(releases.country));
+  // Some releases have no year, country or styles; these keep only those, and with several given, a release missing any one.
+  const missing: SQL[] = [];
+  if (noYear === "true") missing.push(isNull(releases.year));
+  if (noCountry === "true") missing.push(isNull(releases.country));
+  if (noStyles === "true") missing.push(sql`json_array_length(${releases.styles}) = 0`);
+  if (missing.length > 0) filters.push(sql`(${sql.join(missing, sql` OR `)})`);
   if (yearMin.value !== undefined) filters.push(gte(releases.year, yearMin.value));
   if (yearMax.value !== undefined) filters.push(lte(releases.year, yearMax.value));
   // The rating count is only known for enriched releases, so this leaves out the rest.

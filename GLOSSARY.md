@@ -1,8 +1,16 @@
 # Fader
 
-Fader helps a Discogs collector browse releases and fade the ones they aren't interested in. It keeps its own copy of release details so browsing doesn't depend on live Discogs. It has no sellers, inventories or listings.
+Fader helps a Discogs collector browse releases and fade the ones they aren't interested in. It keeps its own copy of release details so browsing doesn't depend on live Discogs. A collector can also index a Discogs seller, which records which releases the seller has on sale so Explore can filter to them.
 
 ## Language
+
+**Seller**:
+A Discogs user whose marketplace inventory a collector asked us to index. Sellers are shared by every collector; the collector who starts a run lends their token and queue lane to it.
+_Avoid_: Shop, store, vendor
+
+**Inventory item**:
+A release a seller had on sale when we last scanned them (one row per seller and release, however many copies they list). `active` while the seller lists it, `sold` once a scan that read the whole inventory no longer sees it; sold rows are purged after 30 days. Explore's `seller` filter keeps the active ones.
+_Avoid_: Stock, product, listing
 
 **Release**:
 One specific Discogs release (a particular pressing or edition), identified by its Discogs release id.
@@ -41,6 +49,28 @@ _Avoid_: Dead letter, skip
 **Inline request**:
 Work a person is actively waiting on, such as a fade's lookup. It goes ahead of background work in the Discogs queue.
 _Avoid_: Priority job, foreground job
+
+## Seller indexing
+
+**Indexing** (a seller):
+Reading a seller's whole marketplace inventory and fetching every release in it that is not stored yet or has no Discogs details yet (only the data dump's row). Running it again for the same seller is a re-index. One **run** per start; a run can end successfully even when some releases failed to fetch.
+_Avoid_: Crawl, scrape, sync
+
+**Scan**:
+The first phase of indexing: walking the seller's inventory pages to record which releases they have, in scan jobs that run ahead of enrichment. Fetching the releases that are not stored or not enriched yet starts as each scan pass ends.
+_Avoid_: Crawl
+
+**Scan pass**:
+One sorted walk over a seller's inventory within a scan. Discogs serves only the first 100 pages (10,000 items) per sort order, so a scan keeps walking further sorts (artist, listed, label, catno, item, price, audio), each ascending then descending, until it has seen every item or run out of passes. A pass ends **capped** when Discogs refuses to paginate any further, and **failed** when a page kept failing. See `docs/adr/0012-seller-inventory-scan.md`.
+_Avoid_: Round, sweep
+
+**Coverage**:
+How many of a seller's inventory items a scan reached: distinct items seen in the run, out of Discogs' listing total while the scan is still short of it. Once the scan has read as many distinct listings as Discogs reports, the total becomes the distinct item count, so our counts can be lower than Discogs' own: several copies of a release are one inventory item here, by design.
+_Avoid_: Completeness, progress
+
+**Remove** (a seller):
+Delete a seller and what hangs off it (inventory links, scan passes, queued jobs), stopping any run in progress. Releases stay, and so do fades. It is also how a collector cancels indexing.
+_Avoid_: Delete, forget, cancel, stop
 
 ## Enrichment
 

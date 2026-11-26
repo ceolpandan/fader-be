@@ -5,8 +5,8 @@ boundary between the extension and Discogs' API — the extension never calls Di
 directly. Only exposes what the extension needs (release/master id, title, etc.), not Discogs' full payloads.
 
 Stores the releases it fetches in a local database, through a Discogs-rate-limited
-request queue, and lists and filters them for `fader-ui`. It has no seller, inventory or listing
-features (see `docs/adr/0005-no-seller-features.md`).
+request queue, and lists and filters them for `fader-ui`. A collector can also index a Discogs
+seller's marketplace inventory (see `docs/adr/0012-seller-inventory-scan.md`).
 
 ## Run locally
 
@@ -32,6 +32,14 @@ Server starts on `http://localhost:3000` (override with `PORT`).
 
 - `GET /releases` — paginated, filterable list of the stored releases (`?page=&pageSize=&sort=` and the filters)
 - `GET /releases/filter-options` — the genres, styles, formats and countries the filter dialog offers, most common first
+
+### Seller indexing
+
+- `POST /sellers/:username/index` — start (or re-trigger) indexing a seller's inventory with the collector's own token (409 `token_required` without one)
+- `GET /sellers` — the indexed sellers, with their for-sale and faded counts and their coverage
+- `GET /sellers/:username` — status and progress of the current run, with its scan passes
+- `DELETE /sellers/:username` — remove a seller and stop its run
+- `GET /releases?seller=<username>` — Explore's filter: only what the seller lists for sale now
 
 ### Discogs token
 

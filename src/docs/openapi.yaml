@@ -96,13 +96,19 @@ paths:
             enum: [only, exclude]
         - name: noYear
           in: query
-          description: "true keeps only releases with no year"
+          description: "true keeps only releases with no year; with other no* flags (noCountry, noStyles), releases missing any of them"
           schema:
             type: string
             enum: ["true"]
         - name: noCountry
           in: query
-          description: "true keeps only releases with no country"
+          description: "true keeps only releases with no country; with other no* flags (noYear, noStyles), releases missing any of them"
+          schema:
+            type: string
+            enum: ["true"]
+        - name: noStyles
+          in: query
+          description: "true keeps only releases with no styles; with other no* flags (noYear, noCountry), releases missing any of them"
           schema:
             type: string
             enum: ["true"]
@@ -183,6 +189,12 @@ paths:
             Only releases one of the user's own scrapes matched, by scrape id. A scrape that does
             not exist, or belongs to another user, matches nothing.
           schema: { type: integer }
+        - name: seller
+          in: query
+          description: >
+            Only releases this indexed seller lists for sale now (see `POST /sellers/{username}/index`),
+            by the username as `GET /sellers` returns it. A seller that is not indexed matches nothing.
+          schema: { type: string, maxLength: 200 }
         - name: sort
           in: query
           description: >
@@ -969,6 +981,125 @@ paths:
                 $ref: "#/components/schemas/ErrorDto"
         "504":
           description: Timed out waiting for Discogs; the fetch is still queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /sellers:
+    get:
+      operationId: listSellers
+      summary: List every seller that has been indexed
+      description: >
+        Sellers are shared by every user: the inventory is the seller's, only the faded count is the
+        user's. Poll it while a seller is running.
+      responses:
+        "200":
+          description: Sellers, by username
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SellerSummaryDto"
+  /sellers/{username}/index:
+    post:
+      operationId: startSellerIndexing
+      summary: >
+        Start (or re-trigger) indexing a Discogs seller's marketplace inventory. The inventory is
+        read page by page, in as many sort orders as it takes to reach all of it (Discogs serves at
+        most 100 pages per sort order); the releases it lists that are not stored yet are fetched
+        too. All of it uses the user's own Discogs token, on their queue lane, in the background.
+        The seller's active items then show on Explore with `seller=<username>`.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Indexing started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexStartedDto"
+        "400":
+          description: The username is empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "404":
+          description: Discogs has no user with this name; nothing was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "409":
+          description: >
+            `token_required`: the user has not saved a Discogs token. `run_active`: indexing is
+            already running for this seller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "502":
+          description: Discogs failed while checking the user; nothing was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "503":
+          description: Discogs is unavailable and being retried; nothing was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+        "504":
+          description: Timed out waiting for Discogs to check the user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+  /sellers/{username}:
+    get:
+      operationId: getSellerStatus
+      summary: Get a seller's indexing status and progress
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Seller status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SellerStatusDto"
+        "404":
+          description: This username has never been indexed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDto"
+    delete:
+      operationId: removeSeller
+      summary: >
+        Remove a seller: stop any indexing run for it and delete the seller, its inventory links,
+        its scan passes and its queued jobs. Releases and fades are kept.
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Seller removed
+        "404":
+          description: This username has never been indexed
           content:
             application/json:
               schema:
@@ -1914,6 +2045,138 @@ components:
       in: query
       schema: { type: integer }
   schemas:
+    IndexStartedDto:
+      type: object
+      required: [username, runId]
+      properties:
+        username:
+          type: string
+          description: Under the casing Discogs reports.
+        runId: { type: string }
+
+    SellerCoverageDto:
+      type: object
+      nullable: true
+      description: >
+        Distinct inventory items the current run has seen, out of all the seller lists. Discogs only
+        serves the first 100 pages of an inventory per sort order, so reachable is lower than total
+        for a large seller until further sort orders have run. Once the scan has read as many
+        distinct listings as Discogs reports, total is the distinct item count (several copies of a
+        release are one item), which can be lower than the listing count Discogs shows. Null before
+        the first page has told us the total.
+      required: [reachable, total]
+      properties:
+        reachable: { type: integer }
+        total: { type: integer }
+
+    SellerSummaryDto:
+      type: object
+      required: [username, avatarUrl, lastIndexedAt, lastIndexStatus, forSaleCount, fadedCount, coverage]
+      properties:
+        username: { type: string }
+        avatarUrl: { type: string, nullable: true }
+        lastIndexedAt: { type: string, nullable: true }
+        lastIndexStatus:
+          type: string
+          enum: [never, running, success, error]
+        forSaleCount:
+          type: integer
+          description: The seller's active items that are stored (releases not fetched yet are not counted), faded ones included.
+        fadedCount:
+          type: integer
+          description: How many of forSaleCount are faded for the user.
+        coverage:
+          $ref: "#/components/schemas/SellerCoverageDto"
+
+    SellerStatusDto:
+      type: object
+      required:
+        [
+          username,
+          lastIndexedAt,
+          lastIndexStatus,
+          currentlyRunning,
+          totalReleasesFound,
+          releasesEnriched,
+          releasesFailed,
+          sellerRating,
+          sellerNumRatings,
+          shipsFromCountry,
+          avatarUrl,
+          phase,
+          scan,
+          etaSeconds,
+          retryingAt,
+          backoffMs,
+          coverage,
+          scanPasses,
+        ]
+      properties:
+        username: { type: string }
+        lastIndexedAt: { type: string, nullable: true }
+        lastIndexStatus:
+          type: string
+          enum: [never, running, success, error]
+        currentlyRunning: { type: boolean }
+        totalReleasesFound:
+          type: integer
+          description: Releases of the seller that this run queued to be fetched because they were not stored yet.
+        releasesEnriched: { type: integer }
+        releasesFailed: { type: integer }
+        sellerRating:
+          type: number
+          nullable: true
+          description: Seller rating as a percentage, e.g. 96.4.
+        sellerNumRatings: { type: integer, nullable: true }
+        shipsFromCountry: { type: string, nullable: true }
+        avatarUrl: { type: string, nullable: true }
+        phase:
+          type: string
+          enum: [scanning, enriching, done]
+          description: scanning while inventory pages are fetched, enriching while releases are, done otherwise.
+        scan:
+          type: object
+          nullable: true
+          description: Inventory scan progress of the current run; null until page 1 is fetched.
+          required: [pagesFetched, pagesTotal]
+          properties:
+            pagesFetched: { type: integer }
+            pagesTotal: { type: integer }
+        etaSeconds:
+          type: integer
+          nullable: true
+          description: Seconds until enrichment finishes; null when unknown (too few releases fetched yet) or not enriching.
+        retryingAt:
+          type: string
+          nullable: true
+          description: When the paused Discogs queue retries (ISO); null while the lane of the user who started the run is not paused.
+        backoffMs: { type: integer, nullable: true }
+        coverage:
+          $ref: "#/components/schemas/SellerCoverageDto"
+        scanPasses:
+          type: array
+          description: The sorted inventory passes of the current run, in the order they ran. Passes (each sort ascending, then descending) keep running until every inventory item has been seen or all of them have run.
+          items:
+            $ref: "#/components/schemas/ScanPassDto"
+
+    ScanPassDto:
+      type: object
+      required:
+        [sort, order, status, pagesPlanned, pagesFetched, itemsSeen, itemsNew, startedAt, endedAt]
+      properties:
+        sort: { type: string, enum: [artist, listed, label, catno, item, price, audio] }
+        order: { type: string, enum: [asc, desc] }
+        status:
+          type: string
+          enum: [running, done, capped, failed]
+          description: capped means Discogs refused to paginate any further, so the pass ended cleanly. failed means a page kept failing, so the pass was abandoned and the scan moved on.
+        pagesPlanned: { type: integer }
+        pagesFetched: { type: integer }
+        itemsSeen: { type: integer, description: Listings Discogs returned in this pass. }
+        itemsNew: { type: integer, description: Inventory links this pass was the first of the run to see. }
+        startedAt: { type: string }
+        endedAt: { type: string, nullable: true }
+
     ErrorDto:
       type: object
       required: [error]

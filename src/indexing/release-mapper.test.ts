@@ -29,6 +29,12 @@ describe("mapDiscogsReleaseToRow", () => {
     });
   });
 
+  it("stores no year for the 0 Discogs sends when it is unknown, or when it sends none", () => {
+    expect(mapDiscogsReleaseToRow({ ...priced(), year: 0 }, new Date()).year).toBeNull();
+    expect(mapDiscogsReleaseToRow(priced(), new Date()).year).toBeNull();
+    expect(mapDiscogsReleaseToRow({ ...priced(), year: 1999 }, new Date()).year).toBe(1999);
+  });
+
   it("stores a link once when Discogs attaches it to every track", () => {
     const raw: DiscogsRelease = {
       id: 60772,
