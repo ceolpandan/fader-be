@@ -255,6 +255,14 @@ export function parseReleaseQuery(
     return { error: "minPrice cannot be above maxPrice" };
   }
 
+  const minVersions = parseOptionalCount(req.query.minVersions, "minVersions");
+  if (minVersions.error) return { error: minVersions.error };
+  const maxVersions = parseOptionalCount(req.query.maxVersions, "maxVersions");
+  if (maxVersions.error) return { error: maxVersions.error };
+  if (minVersions.value !== undefined && maxVersions.value !== undefined && minVersions.value > maxVersions.value) {
+    return { error: "minVersions cannot be above maxVersions" };
+  }
+
   const sortParam =(req.query.sort as string | undefined) ?? "title";
   if (!SORT_OPTIONS.includes(sortParam)) {
     return { error: `sort must be one of ${SORT_OPTIONS.join(", ")}` };
@@ -360,6 +368,9 @@ export function parseReleaseQuery(
   }
   if (minPrice.value !== undefined) filters.push(gte(releases.lowestPrice, minPrice.value));
   if (maxPrice.value !== undefined) filters.push(lte(releases.lowestPrice, maxPrice.value));
+
+  if (minVersions.value !== undefined) filters.push(gte(releases.versionCount, minVersions.value));
+  if (maxVersions.value !== undefined) filters.push(lte(releases.versionCount, maxVersions.value));
 
   const styleCombinations = styleCombinationsFilter({
     include: mergeStyles ? dedupeCombinations([...style.map((s) => [s]), ...includeCombinations]) : includeCombinations,
