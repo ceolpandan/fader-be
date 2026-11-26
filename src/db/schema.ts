@@ -161,7 +161,104 @@ export const filterOptions = sqliteTable(
   (table) => [primaryKey({ columns: [table.kind, table.value] })],
 );
 
-export type QueueJobType = "fade_lookup" | "release_detail" | "discogs_profile" | "discogs_sync" | "scrape_search" | "wantlist_remove";
+export type SellerIndexStatus = "never" | "running" | "success" | "error";
+
+/** A Discogs seller whose marketplace inventory was indexed. Shared by every collector. */
+export const sellers = sqliteTable("sellers", {
+  username: text("username").primaryKey(),
+  lastIndexedAt: integer("last_indexed_at", { mode: "timestamp" }),
+  lastIndexStatus: text("last_index_status").$type<SellerIndexStatus>().notNull(),
+  currentRunId: text("current_run_id"),
+  /** The collector who started the current run: their token and queue lane do the work. */
+  runUid: text("run_uid"),
+  sellerRating: real("seller_rating"),
+  sellerNumRatings: integer("seller_num_ratings"),
+  shipsFromCountry: text("ships_from_country"),
+  avatarUrl: text("avatar_url"),
+  /** Discogs' `pagination.items` for the seller's inventory, known once page 1 is fetched. */
+  inventoryTotal: integer("inventory_total"),
+  /** Inventory pages the current run will scan (capped at the Discogs 100-page limit per pass). */
+  scanPagesTotal: integer("scan_pages_total"),
+  scanPagesFetched: integer("scan_pages_fetched").notNull().default(0),
+  /** Set when the scan phase ends and the release_detail jobs are queued. */
+  scanCompletedAt: integer("scan_completed_at", { mode: "timestamp" }),
+});
+
+export type SellerInventoryStatus = "active" | "sold";
+
+/** One row per release a seller lists (several copies of it are one row); Explore's `seller` filter reads it. */
+export const sellerInventory = sqliteTable(
+  "seller_inventory",
+  {
+    sellerUsername: text("seller_username").notNull(),
+    releaseId: integer("release_id").notNull(),
+    status: text("status").$type<SellerInventoryStatus>().notNull(),
+    firstSeenAt: integer("first_seen_at", { mode: "timestamp" }).notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp" }).notNull(),
+    soldAt: integer("sold_at", { mode: "timestamp" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sellerUsername, table.releaseId] }),
+    index("seller_inventory_release_idx").on(table.releaseId),
+  ],
+);
+
+export type ScanSort = "artist" | "listed" | "label" | "catno" | "item" | "price" | "audio";
+export type ScanOrder = "asc" | "desc";
+/**
+ * `capped`: Discogs refused to paginate any further, so the pass ended cleanly.
+ * `failed`: a page kept failing, so the pass was abandoned and the scan moved on.
+ */
+export type ScanPassStatus = "running" | "done" | "capped" | "failed";
+
+/** One sorted walk over a seller's inventory within an indexing run, kept for diagnosing coverage. */
+export const scanPasses = sqliteTable(
+  "scan_passes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    runId: text("run_id").notNull(),
+    sellerUsername: text("seller_username").notNull(),
+    sort: text("sort").$type<ScanSort>().notNull(),
+    order: text("order").$type<ScanOrder>().notNull(),
+    pagesPlanned: integer("pages_planned").notNull(),
+    pagesFetched: integer("pages_fetched").notNull().default(0),
+    /** Listings Discogs returned in this pass. */
+    itemsSeen: integer("items_seen").notNull().default(0),
+    /** Inventory links this pass was the first of the run to see. */
+    itemsNew: integer("items_new").notNull().default(0),
+    status: text("status").$type<ScanPassStatus>().notNull(),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp" }),
+  },
+  (table) => [uniqueIndex("scan_passes_run_sort_order_idx").on(table.runId, table.sort, table.order)],
+);
+
+/**
+ * The listings each pass of a run has read, so a pass can tell when it has met the walk it
+ * complements and the run can tell it has read every listing. A listing is one copy of a release:
+ * unlike `seller_inventory` this keeps several copies of the same release apart.
+ */
+export const scanListings = sqliteTable(
+  "scan_listings",
+  {
+    runId: text("run_id").notNull(),
+    sellerUsername: text("seller_username").notNull(),
+    sort: text("sort").$type<ScanSort>().notNull(),
+    order: text("order").$type<ScanOrder>().notNull(),
+    listingId: integer("listing_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.runId, table.sort, table.order, table.listingId] })],
+);
+
+export type QueueJobType =
+  | "fade_lookup"
+  | "release_detail"
+  | "discogs_profile"
+  | "discogs_sync"
+  | "scrape_search"
+  | "wantlist_remove"
+  | "inventory_page"
+  | "seller_profile";
 export type QueueJobStatus = "pending" | "processing" | "done" | "failed";
 
 /** Resolves a fade against Discogs: a release fade finds its master, a master fade fetches its versions. */
@@ -202,7 +299,27 @@ export interface ScrapeSearchPayload {
   position: number;
 }
 
+/** One page of a sorted walk over a seller's inventory; the handler queues the next page or the next pass. */
+export interface InventoryPagePayload {
+  uid: string;
+  username: string;
+  page: number;
+  /** ISO timestamp of when this indexing run started, carried unchanged through every chained page: the sold-diff cutoff. */
+  runStartedAt: string;
+  /** Sort of the pass this page belongs to; the first pass is `artist` ascending. */
+  sort?: ScanSort;
+  order?: ScanOrder;
+}
+
+/** Checks a typed username against Discogs; on success the handler creates the Seller and starts its run. */
+export interface SellerProfilePayload {
+  uid: string;
+  username: string;
+}
+
 export interface QueueJobPayloadMap {
+  inventory_page: InventoryPagePayload;
+  seller_profile: SellerProfilePayload;
   fade_lookup: FadeLookupPayload;
   release_detail: ReleaseDetailPayload;
   discogs_profile: DiscogsProfilePayload;
@@ -218,7 +335,15 @@ export const discogsQueueJobs = sqliteTable("discogs_queue_jobs", {
   runId: text("run_id").notNull(),
   type: text("type").$type<QueueJobType>().notNull(),
   payload: text("payload", { mode: "json" })
-    .$type<FadeLookupPayload | ReleaseDetailPayload | DiscogsProfilePayload | DiscogsSyncPayload | ScrapeSearchPayload>()
+    .$type<
+      | FadeLookupPayload
+      | ReleaseDetailPayload
+      | DiscogsProfilePayload
+      | DiscogsSyncPayload
+      | ScrapeSearchPayload
+      | InventoryPagePayload
+      | SellerProfilePayload
+    >()
     .notNull(),
   status: text("status").$type<QueueJobStatus>().notNull().default("pending"),
   priority: integer("priority").notNull().default(0),

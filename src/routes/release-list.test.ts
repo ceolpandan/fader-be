@@ -156,10 +156,33 @@ describe("GET /releases and /releases/filter-options", () => {
 
       expect(titles((await get("/releases?noYear=true")).body)).toEqual(["Neither", "No year"]);
       expect(titles((await get("/releases?noCountry=true")).body)).toEqual(["Neither", "No country"]);
-      expect(titles((await get("/releases?noYear=true&noCountry=true")).body)).toEqual(["Neither"]);
+      expect(titles((await get("/releases?noYear=true&noCountry=true")).body)).toEqual(["Neither", "No country", "No year"]);
       expect(titles((await get("/releases?noYear=true&country=UK")).body)).toEqual(["No year"]);
+      // The either-missing pair still ANDs with the other filters.
+      expect(titles((await get("/releases?noYear=true&noCountry=true&yearMin=1980")).body)).toEqual(["No country"]);
       expect((await get("/releases?noYear=false")).status).toBe(400);
       expect((await get("/releases?noCountry=1")).status).toBe(400);
+    });
+
+    it("filters by noStyles: releases with no styles, joining noYear and noCountry as another way to be missing", async () => {
+      const complete = { year: 1990, country: "UK", styles: ["Techno"], genres: ["Electronic"] };
+      seedRelease(1, "Full", complete);
+      seedRelease(2, "No styles", { ...complete, styles: [] });
+      seedRelease(3, "No year", { ...complete, year: null });
+      seedRelease(4, "No country", { ...complete, country: null });
+      seedRelease(5, "No styles, other genre", { ...complete, styles: [], genres: ["Rock"] });
+
+      expect(titles((await get("/releases?noStyles=true")).body)).toEqual(["No styles", "No styles, other genre"]);
+      expect(titles((await get("/releases?noStyles=true&noYear=true")).body)).toEqual(["No styles", "No styles, other genre", "No year"]);
+      expect(titles((await get("/releases?noStyles=true&noYear=true&noCountry=true")).body)).toEqual([
+        "No country",
+        "No styles",
+        "No styles, other genre",
+        "No year",
+      ]);
+      // The missing group still ANDs with the other filters.
+      expect(titles((await get("/releases?noStyles=true&noYear=true&genre=Electronic")).body)).toEqual(["No styles", "No year"]);
+      expect((await get("/releases?noStyles=false")).status).toBe(400);
     });
 
     it("filters by genre, style, format, country and year", async () => {

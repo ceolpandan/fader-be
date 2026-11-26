@@ -23,6 +23,18 @@ export const AVAILABILITY_PRIORITY = 1;
  * starts (0), which would otherwise wait behind its ~260k jobs.
  */
 export const RAW_BACKFILL_PRIORITY = -1;
+/**
+ * Priority of a seller's inventory scan pages: ahead of background enrichment (0) and availability
+ * fetches (1), behind searches and syncs (5), so a scan finishes in minutes while the releases it
+ * found trickle in. Its own value, so the burst rule below recognises scan jobs.
+ */
+export const SCAN_PRIORITY = 4;
+/**
+ * Scan jobs of a lane in a row before a lower-priority job gets a turn. A scan always has its next
+ * page queued, so without this enrichment would wait for the whole scan; with it, enrichment gets
+ * one slot in every SCAN_BURST + 1.
+ */
+export const SCAN_BURST = 3;
 export const DEFAULT_WAIT_TIMEOUT_MS = 20_000;
 export const BASE_BACKOFF_MS = 2000;
 /** The first pause after a transient Discogs error; each further failure in a row doubles it. */
@@ -97,6 +109,8 @@ interface Lane {
   capRetries: number;
   /** Jobs set aside after exhausting their tries on a 5xx, since the last success. */
   deadLettered: number[];
+  /** Scan jobs claimed in a row, so lower-priority work is not starved by a long scan. */
+  scanStreak: number;
 }
 
 export class DiscogsQueue {
@@ -131,7 +145,7 @@ export class DiscogsQueue {
   private lane(uid: string): Lane {
     let lane = this.lanes.get(uid);
     if (!lane) {
-      lane = { timer: null, running: false, nextAllowedAt: 0, pause: null, consecutiveFailures: 0, capRetries: 0, deadLettered: [] };
+      lane = { timer: null, running: false, nextAllowedAt: 0, pause: null, consecutiveFailures: 0, capRetries: 0, deadLettered: [], scanStreak: 0 };
       this.lanes.set(uid, lane);
     }
     return lane;
@@ -305,8 +319,14 @@ if (this.started && this.hasPending(uid)) this.scheduleTick(uid, lane, PACING_MS
       .all();
 
     const ready = pending.filter((job) => (this.backoffUntil.get(job.id) ?? 0) <= now);
-    const eligible = ready[0];
+    let eligible = ready[0];
+    const lane = this.lane(uid);
+    if (eligible?.priority === SCAN_PRIORITY && lane.scanStreak >= SCAN_BURST) {
+      // Only work below the scan gets the turn: a search or a sync outranks it and has already been taken.
+      eligible = ready.find((job) => job.priority < SCAN_PRIORITY) ?? eligible;
+    }
     if (!eligible) return null;
+    lane.scanStreak = eligible.priority === SCAN_PRIORITY ? lane.scanStreak + 1 : 0;
 
     this.db
       .update(discogsQueueJobs)

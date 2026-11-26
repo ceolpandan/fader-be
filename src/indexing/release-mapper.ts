@@ -12,7 +12,8 @@ export function mapDiscogsReleaseToRow(
   return {
     id: raw.id,
     title: raw.title,
-    year: raw.year ?? null,
+    // Discogs sends 0 for an unknown year.
+    year: raw.year || null,
     country: raw.country ?? null,
     genres: raw.genres ?? [],
     styles: raw.styles ?? [],
